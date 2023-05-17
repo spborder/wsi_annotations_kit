@@ -43,26 +43,40 @@ class AperioXML:
     def __init__(self,
                  annotations,
                  layer_names=None,
-                 mpp=None):
+                 mpp=None,
+                 verbose = True
+                 ):
         
         self.annotations = annotations
         self.layer_names = layer_names
+        self.mpp = mpp
 
         if self.layer_names is None:
             self.layer_names = {i:j for i,j in zip(list(self.annotations.objects.keys()),list(range(1,1+len(list(self.annotations.objects.keys())))))}
 
         self.xml_colors = [65280,65535,33023,255,16711680]
 
+        if verbose:
+            pbar = tqdm(list(self.annotations.objects.keys()))
+
         self.xml_create()
-        for n in self.annotations.objects:
+        for n_idx,n in enumerate(self.annotations.objects):
+
+            if verbose:
+                pbar.update(n_idx)
+                pbar.set_description(f'Converting to Aperio XML format, on: {n}, {len(self.annotations.objects[n])} found')
+
             # Adding new layer to current annotations
             self.xml_add_annotation(id=self.layer_names[n],layer_name = n)
             for o in self.annotations.objects[n]:
                 self.xml_add_region(o)
 
-    def xml_create(self,mpp=None):
-        if not mpp is None:
-            self.xml = ET.Element('Annotations',attrib={'MicronsPerPixel':str(mpp)})
+        if verbose:
+            pbar.close()
+
+    def xml_create(self):
+        if not self.mpp is None:
+            self.xml = ET.Element('Annotations',attrib={'MicronsPerPixel':str(self.mpp)})
         else:
             self.xml = ET.Element('Annotations')
 
@@ -122,14 +136,26 @@ class AperioXML:
     
 class GeoJSON:
     def __init__(self,
-                 annotations):
+                 annotations,
+                 verbose = True):
         
         self.annotations = annotations
 
+        if verbose:
+            pbar = tqdm(list(self.annotations.keys()))
+
         self.geojson_create()
-        for n in self.annotations.objects:
+        for n_idx,n in enumerate(self.annotations.objects):
+            
+            if verbose:
+                pbar.update(n_idx)
+                pbar.set_description(f'Converting to GeoJSON on: {n}, {len(self.annotations.objects[n])} found')
+
             for o in self.annotations.objects[n]:
                 self.geojson_add_region(o)
+
+        if verbose:
+            pbar.close()
 
     def geojson_create(self):
         self.geojson = {'type':'FeatureCollection','features':[]}
@@ -150,16 +176,30 @@ class GeoJSON:
 
 class Histomics:
     def __init(self,
-               annotations):
+               annotations,
+               verbose = True):
         
         self.annotations = annotations
 
+        if verbose:
+            pbar = tqdm(list(self.annotations.objects.keys()))
+
         self.json_create()
-        for n in self.annotations.objects:
+        for n_idx,n in enumerate(self.annotations.objects):
             structure_dict = {'name':n,'attributes':{},'elements':[]}
+
+            if verbose:
+                pbar.update(n_idx)
+                pbar.set_description(f'Converting to Histomics format, on: {n}, {len(self.annotations.objects[n])} found')
+
             for o in self.annotations.objects[n]:
                 structure_dict['elements'].append(self.json_add_region(o))
             self.json.append(structure_dict)
+
+        if verbose:
+            pbar.close()
+
+        return self.json
 
     def json_create(self):
         self.json = []
@@ -247,10 +287,14 @@ class Annotation:
 class Converter:
     def __init__(self,
                  starting_file: str,
-                 ann_dict: dict):
+                 ann_dict: dict,
+                 verbose = True):
 
         self.starting_file = starting_file
         self.file_ext = self.starting_file.split('.')[-1]
+        self.verbose = verbose
+
+        self.invalid_count = 0
 
         # ann_dict = dictionary like {'structure_name':id} 
         # where id can either be layer id for aperio, index for json, or the property key that has the structure name for geojson
@@ -265,12 +309,20 @@ class Converter:
 
         if self.file_ext=='xml':
             
+            # Verboseness just for number of layers for xmls
+            if self.verbose:
+                pbar = tqdm(list(self.ann_dict.keys()))
+
             # Add MPP here if there is one
 
             tree = ET.parse(self.starting_file)
             for idx, structure in enumerate(self.ann_dict):
 
                 structures_in_xml = tree.getroot().findall(f'Annotations[@Id="{str(self.ann_dict[structure])}"]/Regions/Region')
+
+                if self.verbose:
+                    pbar.update(idx)
+                    pbar.set_description(f'Working on: {structure}: {len(structures_in_xml)} found')
                 
                 for struct_idx,region in enumerate(structures_in_xml):
                     vertices = region.findall('./Vertices/Vertex')
@@ -307,8 +359,16 @@ class Converter:
             # Loading initial annotations 
             with open(self.starting_file) as f:
                 geojson_polys = geojson.load(f)
+
+            # Verboseness for each feature in geojson
+            if self.verbose:
+                pbar = tqdm(geojson_polys['features'])
             
-            for f in geojson_polys['features']:
+            for f_idx,f in enumerate(geojson_polys['features']):
+
+                if self.verbose:
+                    pbar.update(f_idx)
+                    pbar.set_description(f'On Feature: {f_idx} of {len(geojson_polys["features"])}')
                 
                 if 'structure' in f['properties']:
                     structure_name = f['properties']['structure']
@@ -332,8 +392,17 @@ class Converter:
             with open(self.starting_file) as f:
                 json_annotations = json.load(f)
 
-            for st in json_annotations:
+            # Verboseness for number of structures
+            if self.verbose:
+                pbar = tqdm(json_annotations)
+
+            for st_idx,st in enumerate(json_annotations):
                 structure = st['name']
+
+                if self.verbose:
+                    pbar.update(st_idx)
+                    pbar.set_description(f'Working on: {structure}, found: {len(st["elements"])}')
+
                 for o in st['elements']:
 
                     coordinates = o['points']
@@ -358,6 +427,11 @@ class Converter:
                             structure = structure,
                             name = name
                         )
+
+        # Closing progress bar
+        if self.verbose:
+            pbar.close()
+            print(f'Found: {self.invalid_count} Invalid Polygons in annotations')
 
     def check_validity(self,poly):
 
@@ -395,6 +469,9 @@ class Converter:
         else:
             struct_poly = None
 
+        if not struct_poly is None:
+            self.invalid_count +=1
+
         return struct_poly
         
     def xml_save(self,filename):
@@ -408,12 +485,6 @@ class Converter:
     def json_save(self,filename):
 
         self.annotation.json_save(filename)
-
-
-
-
-
-
 
 
 
