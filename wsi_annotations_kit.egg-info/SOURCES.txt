@@ -1,0 +1,7 @@
+LICENSE
+README.md
+setup.py
+wsi_annotations_kit.egg-info/PKG-INFO
+wsi_annotations_kit.egg-info/SOURCES.txt
+wsi_annotations_kit.egg-info/dependency_links.txt
+wsi_annotations_kit.egg-info/top_level.txt
