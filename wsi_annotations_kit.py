@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 import shapely
 from shapely.geometry import box, Polygon, shape
+from skimage.measure import label, find_contours
 import uuid
 
 
@@ -53,7 +54,7 @@ class AperioXML:
 
         if self.layer_names is None:
             self.layer_names = {i:j for i,j in zip(list(self.annotations.objects.keys()),list(range(1,1+len(list(self.annotations.objects.keys())))))}
-
+        
         self.xml_colors = [65280,65535,33023,255,16711680]
 
         if verbose:
@@ -100,6 +101,7 @@ class AperioXML:
         poly = obj.poly
         crs = obj.crs
         name = obj.name
+        id = self.layer_names[obj.structure]
 
         annotation = self.xml.find(f'Annotation[@Id="{id}"]')
         regions = annotation.find('Regions')
@@ -142,7 +144,7 @@ class GeoJSON:
         self.annotations = annotations
 
         if verbose:
-            pbar = tqdm(list(self.annotations.keys()))
+            pbar = tqdm(list(self.annotations.objects.keys()))
 
         self.geojson_create()
         for n_idx,n in enumerate(self.annotations.objects):
@@ -175,7 +177,7 @@ class GeoJSON:
     
 
 class Histomics:
-    def __init(self,
+    def __init__(self,
                annotations,
                verbose = True):
         
@@ -198,8 +200,6 @@ class Histomics:
 
         if verbose:
             pbar.close()
-
-        return self.json
 
     def json_create(self):
         self.json = []
@@ -228,12 +228,14 @@ class Histomics:
 
 class Annotation:
     def __init__(self,
-                 mpp = None):
+                 mpp = None,
+                 min_size = None):
 
         self.objects = {}
         self.structure_names = []
 
         self.mpp = mpp
+        self.min_size = min_size
     
     def __str__(self):
         
@@ -250,10 +252,10 @@ class Annotation:
         # box_crs = upper left corner for location that this object is in 
         # structure = structure name (which structure is this in general)
         # name = shape name (individual object name)
-        if name not in self.objects:
-            self.objects[name] = [Object(poly,box_crs,structure,name)]
+        if structure not in self.objects:
+            self.objects[structure] = [Object(poly,box_crs,structure,name)]
         else:
-            self.objects[name] = [Object(poly,box_crs,structure,name)]
+            self.objects[structure] = [Object(poly,box_crs,structure,name)]
     
     def add_names(self,names):
         
@@ -263,8 +265,9 @@ class Annotation:
             self.structure_names.append(n)
             
     def xml_save(self,filename, layer_ids=None):
-        xml_annotations = AperioXML(self,self.structure_names,self.mpp)
-        xml_string = ET.tostring(xml_annotations,encoding='unicode',pretty_pint = True)
+
+        xml_annotations = AperioXML(self,layer_ids,self.mpp)
+        xml_string = ET.tostring(xml_annotations.xml,encoding='unicode',pretty_print = True)
         with open(filename,'w') as f:
             f.write(xml_string)
             f.close()
@@ -273,15 +276,96 @@ class Annotation:
 
         geojson_annotations = GeoJSON(self)
         with open(filename,'w') as f:
-            dump(geojson_annotations,f)        
+            dump(geojson_annotations.geojson,f)        
             f.close()
 
     def json_save(self,filename):
 
         json_annotations = Histomics(self)
         with open(filename,'w') as f:
-            dump(json_annotations,f)
+            dump(json_annotations.json,f)
             f.close()
+
+    def add_mask(self,mask,box_crs,mask_type,structure = None):
+
+        # Adding a mask object to your set of annotations
+        # type = either 'one-hot' or nothing
+        # structure here should be a list or dictionary for aligning index/label with structure
+        if mask_type == 'one-hot':
+            # Expecting mask format [height, width, classes]
+            for cls in range(np.shape(mask)[-1]):
+                
+                if not structure is None:
+                    if type(structure) == list:
+                        structure_name = structure[cls]
+                    elif type(structure) == dict:
+                        structure_name = structure[str(cls)]
+                    elif type(structure) == str:
+                        structure_name = structure
+                    else:
+                        # Add some raise statement here
+                        raise ValueError
+                    
+                class_mask = mask[:,:,cls].copy()
+
+                # Using label to get number of objects 
+                labeled_mask, n_objects = label(class_mask,background=0,return_num=True)
+                for i in range(n_objects):
+                    
+                    # Find contours where labeled mask is equal to i
+                    obj_contours = find_contours(labeled_mask,i)
+
+                    # This is in (rows,columns) format
+                    poly_list = [(i[0],i[1]) for i in obj_contours]
+                    # Making polygon from contours
+                    obj_poly = Polygon(poly_list)
+                    self.add_shape(obj_poly,box_crs,structure_name)
+        else:
+            # Expecting mask format [height, width]
+            if type(structure)==list:
+                n_struct = len(structure)
+            elif type(structure)==dict:
+                n_struct=len(list(structure.keys()))
+            elif type(structure)==str:
+                n_struct = 1
+            else:
+                raise ValueError
+            
+            for cls in range(n_struct):
+
+                # Assuming background is set to zero
+                if type(structure)==list:
+                    struct_idx = cls+1
+                    structure_name = structure[cls]
+                elif type(structure)==dict:
+                    struct_idx = structure[list(structure.keys())[cls]]
+                    structure_name = list(structure.keys())[cls]
+                elif type(structure)==str:
+                    struct_idx = 1
+                    structure_name = structure
+
+                class_mask = (mask.copy()==struct_idx)
+
+                # Using label to get number of objects
+                labeled_mask, n_objects = label(class_mask,background=0,return_num=True)
+                for i in range(n_objects):
+
+                    # Find contours where labeled mask is equal to i
+                    obj_contours = find_contours(labeled_mask==i+1)
+                    if len(obj_contours)==1:
+                        poly_list = obj_contours[0].tolist()
+                        poly_list = [(int(i[0]),int(i[1])) for i in poly_list]
+                    else:
+                        # Find the largest one
+                        contours_size = [np.shape(i)[0] for i in obj_contours]
+                        poly_list = obj_contours[np.argmax(contours_size)].tolist()
+                        poly_list = [(int(i[0]),int(i[1])) for i in poly_list]
+
+                    if len(poly_list)>2:
+                        # Making polygon from contours 
+                        obj_poly = Polygon(poly_list)
+                        self.add_shape(obj_poly,box_crs,structure_name)
+
 
 
 class Converter:
