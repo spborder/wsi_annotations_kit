@@ -12,6 +12,11 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/spborder/wsi_annotations_kit",
+    install_requires=[
+        "lxml",
+        "geojson",
+        "shapely"
+    ],
     packages=setuptools.find_packages(),
     classifiers=(
         "Programming Language :: Python :: 3",
