@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="wsi-annotations-kit",
+    name="wsi_annotations_kit",
     version="1.0.1",
     author="Sam Border",
     author_email="sam.border2256@gmail.com",
