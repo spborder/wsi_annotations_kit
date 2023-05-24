@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: wsi-annotations-kit
-Version: 1.0.1
+Version: 1.0.2
 Summary: Utility functions for generating, saving, and converting annotation files
 Home-page: https://github.com/spborder/wsi_annotations_kit
 Author: Sam Border
@@ -12,4 +12,10 @@ Description-Content-Type: text/markdown
 License-File: LICENSE
 
 # wsi_annotations_kit
-utility functions for generation, conversion, and saving annotation files for various whole slide image viewers
+Utility functions for generation, conversion, and saving annotation files for various whole slide image viewers
+
+Version 1.0.0: Initial release, annotations from shapely Polygons
+
+Version 1.0.1: Annotations generated from masks
+
+
