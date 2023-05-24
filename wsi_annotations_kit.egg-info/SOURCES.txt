@@ -1,6 +1,8 @@
 LICENSE
 README.md
 setup.py
+wsi_annotations_kit/__init__.py
+wsi_annotations_kit/wsi_annotations_kit.py
 wsi_annotations_kit.egg-info/PKG-INFO
 wsi_annotations_kit.egg-info/SOURCES.txt
 wsi_annotations_kit.egg-info/dependency_links.txt
