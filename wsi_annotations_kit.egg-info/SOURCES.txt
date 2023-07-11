@@ -6,4 +6,5 @@ wsi_annotations_kit/wsi_annotations_kit.py
 wsi_annotations_kit.egg-info/PKG-INFO
 wsi_annotations_kit.egg-info/SOURCES.txt
 wsi_annotations_kit.egg-info/dependency_links.txt
+wsi_annotations_kit.egg-info/requires.txt
 wsi_annotations_kit.egg-info/top_level.txt

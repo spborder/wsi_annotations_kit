@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: wsi-annotations-kit
-Version: 1.1
+Version: 1.1.4
 Summary: Utility functions for generating, saving, and converting annotation files
 Home-page: https://github.com/spborder/wsi_annotations_kit
 Author: Sam Border

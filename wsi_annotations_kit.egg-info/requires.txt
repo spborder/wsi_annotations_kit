@@ -1,0 +1,7 @@
+lxml
+geojson
+shapely
+tqdm
+numpy
+uuid
+scikit-image
