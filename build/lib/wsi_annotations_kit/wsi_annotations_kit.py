@@ -26,12 +26,14 @@ class Object:
                  shape_structure,
                  location,
                  structure_name,
-                 name):
+                 name,
+                 properties = None):
     
         self.poly = shape_structure
         self.crs = location
         self.structure = structure_name
         self.name = name
+        self.properties = properties
 
         # If not specified just pick something general
         if self.structure is None:
@@ -135,7 +137,6 @@ class AperioXML:
                                                 'Y':str(scaled_poly_coords[0][0]),
                                                 'Z':'0'})
         
-    
 class GeoJSON:
     def __init__(self,
                  annotations,
@@ -170,11 +171,17 @@ class GeoJSON:
 
         new_poly = Polygon(scaled_poly_coords)
 
-
-        self.geojson['features'].append(
-            Feature(geometry=new_poly,properties={'label':obj.name,'structure':obj.structure})
-        )
-    
+        if obj.properties is None:
+            self.geojson['features'].append(
+                Feature(geometry=new_poly,properties={'label':obj.name,'structure':obj.structure})
+            )
+        else:
+            prop_dict = obj.properties
+            prop_dict['label'] = obj.name
+            prop_dict['structure'] = obj.structure
+            self.geojson['features'].append(
+                Feature(geometry = new_poly, properties=prop_dict)
+            )    
 
 class Histomics:
     def __init__(self,
@@ -212,16 +219,28 @@ class Histomics:
 
         new_poly = Polygon(scaled_poly_coords)
 
-        new_struct_dict = {
-            'type':'polyline',
-            'points':list(new_poly.exterior.coords),
-            'id':uuid.uuid4().hex[:24],
-            'closed':True,
-            'user': {
-                'name': obj.name,
-                'structure': obj.structure
+        if obj.properties is None:
+            new_struct_dict = {
+                'type':'polyline',
+                'points':[list(i)+[0] for i in list(new_poly.exterior.coords)],
+                'id':uuid.uuid4().hex[:24],
+                'closed':True,
+                'user': {
+                    'name': obj.name,
+                    'structure': obj.structure
+                }
             }
-        }
+        else:
+            prop_dict = obj.properties
+            prop_dict['name'] = obj.name
+            prop_dict['structure'] = obj.structure
+            new_struct_dict = {
+                'type':'polyline',
+                'points':[list(i)+[0] for i in list(new_poly.exterior.coords)],
+                'id':uuid.uuid4().hex[:24],
+                'closed':True,
+                'user': prop_dict
+            }
 
         return new_struct_dict
 
@@ -240,28 +259,26 @@ class Annotation:
     def __str__(self):
         
         if len(list(self.objects.keys()))==0:
-            print('Empty annotation object')
+            return 'Empty annotation object'
         else:
-            print(f'Annotation object containing: {len(list(self.objects.keys()))}')
-            for n in self.objects:
-                print(f'{n}: {len(self.objects[n])}')
+            return f'Annotation object containing: {len(list(self.objects.keys()))}'
 
-    def add_shape(self, poly, box_crs, structure = None, name = None):
+    def add_shape(self, poly, box_crs, structure = None, name = None, properties = None):
         
         # poly = shapely polygon or other geometry
         # box_crs = upper left corner for location that this object is in 
         # structure = structure name (which structure is this in general)
         # name = shape name (individual object name)
         if structure not in self.objects:
-            self.objects[structure] = [Object(poly,box_crs,structure,name)]
+            self.objects[structure] = [Object(poly,box_crs,structure,name,properties)]
         else:
-            self.objects[structure] = [Object(poly,box_crs,structure,name)]
+            self.objects[structure].append(Object(poly,box_crs,structure,name,properties))
     
     def add_names(self,names):
         
         # Initializing 
         for n in names:
-            self.objects[n] = {}
+            self.objects[n] = []
             self.structure_names.append(n)
             
     def xml_save(self,filename, layer_ids=None):
