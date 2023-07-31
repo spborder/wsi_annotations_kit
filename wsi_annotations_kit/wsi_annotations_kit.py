@@ -401,7 +401,7 @@ class Converter:
         # where id can either be layer id for aperio, index for json, or the property key that has the structure name for geojson
         self.ann_dict = ann_dict
 
-        self.annotation = self.ingest_annotations()
+        self.ingest_annotations()
 
     def ingest_annotations(self):
 
@@ -419,7 +419,7 @@ class Converter:
             tree = ET.parse(self.starting_file)
             for idx, structure in enumerate(self.ann_dict):
 
-                structures_in_xml = tree.getroot().findall(f'Annotations[@Id="{str(self.ann_dict[structure])}"]/Regions/Region')
+                structures_in_xml = tree.getroot().findall(f'Annotation[@Id="{str(self.ann_dict[structure])}"]/Regions/Region')
 
                 if self.verbose:
                     pbar.update(idx)
@@ -452,7 +452,7 @@ class Converter:
                         if not checked_poly is None:
                             self.annotation.add_shape(
                                 poly = checked_poly,
-                                crs = [0,0],
+                                box_crs = [0,0],
                                 structure = structure,
                                 name = name)
 
@@ -524,7 +524,7 @@ class Converter:
                     if not checked_poly is None:
                         self.annotation.add_shape(
                             poly = checked_poly,
-                            crs = [0,0],
+                            box_crs = [0,0],
                             structure = structure,
                             name = name
                         )

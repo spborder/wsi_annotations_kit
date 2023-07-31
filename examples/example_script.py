@@ -26,7 +26,6 @@ def preprocess_mask(mask_image,mask_type):
         # Processing for one-hot
         processed_mask = np.zeros((np.shape(gray_image)[0],np.shape(gray_image)[1],n_class))
         for class_idx,cls in enumerate(classes):
-
             processed_mask[:,:,class_idx] = (gray_image==cls)
 
     else:
