@@ -270,6 +270,7 @@ class Annotation:
         # structure = structure name (which structure is this in general)
         # name = shape name (individual object name)
         if structure not in self.objects:
+            print('new object')
             self.objects[structure] = [Object(poly,box_crs,structure,name,properties)]
         else:
             self.objects[structure].append(Object(poly,box_crs,structure,name,properties))
@@ -401,12 +402,12 @@ class Converter:
         # where id can either be layer id for aperio, index for json, or the property key that has the structure name for geojson
         self.ann_dict = ann_dict
 
-        self.ingest_annotations()
+        self.annotation = self.ingest_annotations()
 
     def ingest_annotations(self):
 
-        self.annotation = Annotation()
-        self.annotation.add_names(list(self.ann_dict.keys()))
+        annotation = Annotation()
+        annotation.add_names(list(self.ann_dict.keys()))
 
         if self.file_ext=='xml':
             
@@ -427,7 +428,6 @@ class Converter:
                 
                 for struct_idx,region in enumerate(structures_in_xml):
                     vertices = region.findall('./Vertices/Vertex')
-
                     coords = []
                     for vert in vertices:
                         pixel_coords = (np.float32(vert.attrib['X']),np.float32(vert.attrib['Y']))
@@ -446,11 +446,11 @@ class Converter:
                         region_poly = Polygon(coords)
 
                         # Checking if this polygon is valid
-                        checked_poly = self.check_validity(region_poly)
+                        checked_poly, add_to_annotation = self.check_validity(region_poly)
 
                         # Adding to current annotations if valid
-                        if not checked_poly is None:
-                            self.annotation.add_shape(
+                        if add_to_annotation:
+                            annotation.add_shape(
                                 poly = checked_poly,
                                 box_crs = [0,0],
                                 structure = structure,
@@ -473,15 +473,20 @@ class Converter:
                 
                 if 'structure' in f['properties']:
                     structure_name = f['properties']['structure']
+                elif 'classification' in f['properties']:
+                    if 'name' in f['properties']['classification']:
+                        structure_name = f['properties']['classification']['name']
+                    else:
+                        structure_name = f'Structure'
                 else:
                     structure_name = 'Structure'
-
+                
                 if 'name' in f['properties']:
                     name = f['properties']['name']
                 else:
                     name = None
                 
-                self.annotation.add_shape(
+                annotation.add_shape(
                     poly = shape(f['geometry']),
                     box_crs = [0,0],
                     structure = structure_name,
@@ -498,31 +503,63 @@ class Converter:
                 pbar = tqdm(json_annotations)
 
             for st_idx,st in enumerate(json_annotations):
-                structure = st['name']
+                if 'name' in st:
+                    structure = st['name']
+                elif 'properties' in st:
+                    if 'classification' in st['properties']:
+                        if 'name' in st['properties']['classification']:
+                            structure = st['properties']['classification']['name']
+                        else:
+                            structure = f'Structure_{st_idx}'
+                    else:
+                        structure = f'Structure_{st_idx}'
+                else:
+                    structure = f'Structure_{st_idx}'
 
                 if self.verbose:
                     pbar.update(st_idx)
                     pbar.set_description(f'Working on: {structure}, found: {len(st["elements"])}')
 
-                for o in st['elements']:
+                if 'elements' in st:
+                    for o in st['elements']:
 
-                    coordinates = o['points']
-                    coordinates = [(i[0],i[1]) for i in coordinates]
+                        coordinates = o['points']
+                        coordinates = [(i[0],i[1]) for i in coordinates]
 
-                    if 'user' in o:
-                        if 'name' in o['user']:
-                            name = o['user']['name']
+                        if 'user' in o:
+                            if 'name' in o['user']:
+                                name = o['user']['name']
+                            else:
+                                name = None
                         else:
                             name = None
+                        
+                        # Probably don't need to check these? 
+                        region_poly = Polygon(coordinates)
+                        checked_poly = self.check_validity(region_poly)
+
+                        if not checked_poly is None:
+                            annotation.add_shape(
+                                poly = checked_poly,
+                                box_crs = [0,0],
+                                structure = structure,
+                                name = name
+                            )
+                elif 'geometry' in st:
+                    coordinates = st['geometry']['coordinates']
+                    coordinates = np.squeeze(coordinates)
+                    coordinates = [(i[0],i[1]) for i in coordinates]
+
+                    if 'name' in st['properties']:
+                        name = st['properties']['name']
                     else:
                         name = None
-                    
-                    # Probably don't need to check these? 
+
                     region_poly = Polygon(coordinates)
                     checked_poly = self.check_validity(region_poly)
 
                     if not checked_poly is None:
-                        self.annotation.add_shape(
+                        annotation.add_shape(
                             poly = checked_poly,
                             box_crs = [0,0],
                             structure = structure,
@@ -533,6 +570,8 @@ class Converter:
         if self.verbose:
             pbar.close()
             print(f'Found: {self.invalid_count} Invalid Polygons in annotations')
+
+        return annotation
 
     def check_validity(self,poly):
 
@@ -562,18 +601,26 @@ class Converter:
                         struct_poly = mod_shape[0]
                     else:
                         struct_poly = None
+
+                elif mod_shape.geom_type=='Polygon':
+                    struct_poly = mod_shape
                 else:
                     struct_poly = None
 
+            elif mod_shape.geom_type=='Polygon':
+                struct_poly = mod_shape
             else:
                 struct_poly = None
         else:
-            struct_poly = None
+            struct_poly = poly
 
-        if not struct_poly is None:
+        if struct_poly is None:
             self.invalid_count +=1
+            add_to_annotation = False
+        else:
+            add_to_annotation = True
 
-        return struct_poly
+        return struct_poly, add_to_annotation
         
     def xml_save(self,filename):
 
