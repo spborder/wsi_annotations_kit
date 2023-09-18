@@ -455,6 +455,8 @@ class Converter:
                                 box_crs = [0,0],
                                 structure = structure,
                                 name = name)
+                        else:
+                            print('Found invalid shape')
 
         if self.file_ext == 'geojson':
             # Loading initial annotations 
@@ -539,7 +541,7 @@ class Converter:
     def check_validity(self,poly):
 
         if not poly.is_valid:
-            mod_shape = shapely.geometry.base.geom_factory(shapely.geos.lgeos.GEOSMakeValid(poly._geom))
+            mod_shape = shapely.validation.make_valid(poly)
 
             if mod_shape.geom_type == 'GeometryCollection' or mod_shape.geom_type == 'MultiPolygon':
                 mod_shape = [i for i in list(mod_shape.geoms) if i.geom_type=='Polygon']
@@ -553,7 +555,7 @@ class Converter:
 
             elif mod_shape.geom_type == 'LineString':
                 mod_shape = poly.buffer(0)
-                mod_shape = shapely.geometry.base.geom_factory(shapely.geos.lgeos.GEOSMakeValid(mod_shape._geom))
+                mod_shape = shapely.validation.make_valid(mod_shape)
                 
                 if mod_shape.geom_type == 'GeometryCollection' or mod_shape.geom_type == 'MultiPolygon':
                     mod_shape = [i for i in list(mod_shape.geoms) if i.geom_type=='Polygon']
