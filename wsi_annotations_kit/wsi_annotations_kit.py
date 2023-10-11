@@ -203,8 +203,11 @@ class Histomics:
                 pbar.set_description(f'Converting to Histomics format, on: {n}, {len(self.annotations.objects[n])} found')
 
             for o in self.annotations.objects[n]:
-                structure_dict['elements'].append(self.json_add_region(o))
-            self.json.append({'annotation':structure_dict})
+                new_region = self.json_add_region(o)
+                if not new_region is None:
+                    structure_dict['elements'].append(self.json_add_region(o))
+            if len(structure_dict)>0:
+                self.json.append({'annotation':structure_dict})
 
         if verbose:
             pbar.close()
@@ -244,7 +247,9 @@ class Histomics:
                     'user': prop_dict
                 }
 
-        return new_struct_dict
+            return new_struct_dict
+        else:
+            return None
 
 
 class Annotation:
