@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 import shapely
 from shapely.geometry import box, Polygon, shape
+from shapely.validation import make_valid
 from skimage.measure import label, find_contours
 import uuid
 
@@ -203,7 +204,7 @@ class Histomics:
 
             for o in self.annotations.objects[n]:
                 structure_dict['elements'].append(self.json_add_region(o))
-            self.json.append(structure_dict)
+            self.json.append({'annotation':structure_dict})
 
         if verbose:
             pbar.close()
@@ -219,28 +220,29 @@ class Histomics:
 
         new_poly = Polygon(scaled_poly_coords)
 
-        if obj.properties is None:
-            new_struct_dict = {
-                'type':'polyline',
-                'points':[list(i)+[0] for i in list(new_poly.exterior.coords)],
-                'id':uuid.uuid4().hex[:24],
-                'closed':True,
-                'user': {
-                    'name': obj.name,
-                    'structure': obj.structure
+        if len(scaled_poly_coords)>0:
+            if obj.properties is None:
+                new_struct_dict = {
+                    'type':'polyline',
+                    'points':[list(i)+[0] for i in list(new_poly.exterior.coords)],
+                    'id':uuid.uuid4().hex[:24],
+                    'closed':True,
+                    'user': {
+                        'name': obj.name,
+                        'structure': obj.structure
+                    }
                 }
-            }
-        else:
-            prop_dict = obj.properties
-            prop_dict['name'] = obj.name
-            prop_dict['structure'] = obj.structure
-            new_struct_dict = {
-                'type':'polyline',
-                'points':[list(i)+[0] for i in list(new_poly.exterior.coords)],
-                'id':uuid.uuid4().hex[:24],
-                'closed':True,
-                'user': prop_dict
-            }
+            else:
+                prop_dict = obj.properties
+                prop_dict['name'] = obj.name
+                prop_dict['structure'] = obj.structure
+                new_struct_dict = {
+                    'type':'polyline',
+                    'points':[list(i)+[0] for i in list(new_poly.exterior.coords)],
+                    'id':uuid.uuid4().hex[:24],
+                    'closed':True,
+                    'user': prop_dict
+                }
 
         return new_struct_dict
 
@@ -520,8 +522,10 @@ class Converter:
 
                 if self.verbose:
                     pbar.update(st_idx)
-                    pbar.set_description(f'Working on: {structure}, found: {len(st["elements"])}')
-
+                    if 'elements' in st:
+                        pbar.set_description(f'Working on: {structure}, found: {len(st["elements"])}')
+                    
+                    
                 if 'elements' in st:
                     for o in st['elements']:
 
@@ -578,7 +582,7 @@ class Converter:
     def check_validity(self,poly):
 
         if not poly.is_valid:
-            mod_shape = shapely.validation.make_valid(poly)
+            mod_shape = make_valid(poly)
 
             if mod_shape.geom_type == 'GeometryCollection' or mod_shape.geom_type == 'MultiPolygon':
                 mod_shape = [i for i in list(mod_shape.geoms) if i.geom_type=='Polygon']
@@ -592,7 +596,7 @@ class Converter:
 
             elif mod_shape.geom_type == 'LineString':
                 mod_shape = poly.buffer(0)
-                mod_shape = shapely.validation.make_valid(mod_shape)
+                mod_shape = make_valid(mod_shape)
                 
                 if mod_shape.geom_type == 'GeometryCollection' or mod_shape.geom_type == 'MultiPolygon':
                     mod_shape = [i for i in list(mod_shape.geoms) if i.geom_type=='Polygon']

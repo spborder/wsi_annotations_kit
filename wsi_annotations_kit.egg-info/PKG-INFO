@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: wsi-annotations-kit
-Version: 1.2.15
+Version: 1.2.21
 Summary: Utility functions for generating, saving, and converting annotation files
 Home-page: https://github.com/spborder/wsi_annotations_kit
 Author: Sam Border
@@ -10,6 +10,13 @@ Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Description-Content-Type: text/markdown
 License-File: LICENSE
+Requires-Dist: lxml
+Requires-Dist: geojson
+Requires-Dist: shapely==2.0.1
+Requires-Dist: tqdm
+Requires-Dist: numpy
+Requires-Dist: uuid
+Requires-Dist: scikit-image
 
 # wsi_annotations_kit
 Utility functions for generation, conversion, and saving annotation files for various whole slide image viewers
