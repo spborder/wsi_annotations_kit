@@ -567,9 +567,9 @@ class Converter:
                         name = None
 
                     region_poly = Polygon(coordinates)
-                    checked_poly = self.check_validity(region_poly)
+                    checked_poly, add_to_annotation = self.check_validity(region_poly)
 
-                    if not checked_poly is None:
+                    if add_to_annotation:
                         annotation.add_shape(
                             poly = checked_poly,
                             box_crs = [0,0],
