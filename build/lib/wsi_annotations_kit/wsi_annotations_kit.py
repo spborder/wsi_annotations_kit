@@ -357,7 +357,6 @@ class Annotation:
                 raise ValueError
             
             for cls in range(n_struct):
-
                 # Assuming background is set to zero
                 if type(structure)==list:
                     struct_idx = cls+1
@@ -374,7 +373,6 @@ class Annotation:
                 # Using label to get number of objects
                 labeled_mask, n_objects = label(class_mask,background=0,return_num=True)
                 for i in range(n_objects):
-
                     # Find contours where labeled mask is equal to i
                     obj_contours = find_contours(labeled_mask==i+1)
                     if len(obj_contours)==1:
@@ -390,7 +388,6 @@ class Annotation:
                         # Making polygon from contours 
                         obj_poly = Polygon(poly_list)
                         self.add_shape(obj_poly,box_crs,structure_name)
-
 
 
 class Converter:
