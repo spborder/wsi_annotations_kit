@@ -11,10 +11,10 @@ import uuid
 # Input file will be input_file.xml
 # Output file will be output_file.json
 
-input_file_name = 'input_file.xml'
-output_file_name = 'output_file.json'
+input_file_name = 'C:\\Users\\Sam\\Downloads\\output_file.xml'
+output_file_name = 'C:\\Users\\Sam\\Downloads\\output_file_2.json'
 
-def add_element(output_file,ann_idx,coords):
+def add_element(coords):
 
     element_dict = {
         'type':'polyline',
@@ -23,16 +23,14 @@ def add_element(output_file,ann_idx,coords):
         'closed':True
     }
 
-    output_file[ann_idx]['elements'].append(element_dict)
-
-
+    return element_dict
 
 tree = ET.parse(input_file_name)
 structures_in_xml = tree.getroot().findall('Annotation')
 output_file = []    
 for ann_idx in range(0,len(structures_in_xml)):
 
-    this_structure = tree.getroot().findall(f'Annotation[@Id="{str(ann_idx+1)}]/Regions/Region')
+    this_structure = tree.getroot().findall(f'Annotation[@Id="{str(ann_idx+1)}"]/Regions/Region')
 
     output_file.append(
         {
@@ -48,13 +46,14 @@ for ann_idx in range(0,len(structures_in_xml)):
         coords = []
         for vert in vertices:
             coords.append([
-                int(vert.attrib['X']),
-                int(vert.attrib['Y'])
+                int(float(vert.attrib['X'])),
+                int(float(vert.attrib['Y']))
             ])
         
-        add_element(output_file,ann_idx,coords)
+        output_file[ann_idx]['annotation']['elements'].append(add_element(coords))
 
-
+with open(output_file_name,'w') as f:
+    json.dump(output_file,f)
 
 
 

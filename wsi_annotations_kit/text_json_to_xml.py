@@ -11,8 +11,8 @@ import lxml.etree as ET
 # Input file will be "input_file.json"
 # output file will be "output_file.xml"
 
-input_file_name = 'input_file.json'
-output_file_name = 'output_file.xml'
+input_file_name = 'C:\\Users\\Sam\\Downloads\\Glomeruli.json'
+output_file_name = 'C:\\Users\\Sam\\Downloads\\output_file.xml'
 
 with open(input_file_name,'r') as f:
     input_json = json.load(f)
@@ -58,8 +58,14 @@ def xml_add_region(poly_coords,xml,layer_id,region_id=None):
 
 # Initial xml colors, add more if needed
 output_xml = ET.Element('Annotations')
-for ann_idx,ann in enumerate(input_json):
 
+if not type(input_json)==list:
+    input_json = [input_json]
+
+print(type(input_json))
+
+for ann_idx,ann in enumerate(input_json):
+    print(ann)
     if 'name' in ann['annotation']:
         structure_name = ann['annotation']['name']
     else:
@@ -68,16 +74,15 @@ for ann_idx,ann in enumerate(input_json):
     xml_add_annotation(output_xml,ann_idx+1,structure_name)
     
     if 'elements' in ann['annotation']:
-        for obj_idx,obj in ann['annotation']['elements']:
+        for obj_idx,obj in enumerate(ann['annotation']['elements']):
 
             coords = obj['points']
 
             xml_add_region(coords,output_xml,ann_idx+1)
 
 xml_string = ET.tostring(output_xml,encoding='unicode',pretty_print=True)
-with open(input_file_name,'w') as f:
+with open(output_file_name,'w') as f:
     f.write(xml_string)
-    f.close()
 
 
 
