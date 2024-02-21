@@ -51,12 +51,12 @@ def main():
 
     # Initializing annotation object
     annotation = wak.Annotation()
-    annotation.add_names([f'Structure{i}' for i in range(n_struct)])
+    annotation.add_names([f'Structure{i}' for i in range(n_struct-1)])
     annotation.add_mask(
         mask = processed_mask,
         box_crs = [0,0],
         mask_type='non-one-hot',
-        structure = [f'Structure{i}' for i in range(n_struct)]
+        structure = [f'Structure{i}' for i in range(n_struct-1)]
     )
 
     # Testing saving annotations

@@ -22,6 +22,8 @@ from skimage.measure import label, find_contours
 import uuid
 
 
+import matplotlib.pyplot as plt
+
 class Object:
     def __init__(self,
                  shape_structure,
@@ -277,7 +279,6 @@ class Annotation:
         # structure = structure name (which structure is this in general)
         # name = shape name (individual object name)
         if structure not in self.objects:
-            print('new object')
             self.objects[structure] = [Object(poly,box_crs,structure,name,properties)]
         else:
             self.objects[structure].append(Object(poly,box_crs,structure,name,properties))
@@ -373,16 +374,17 @@ class Annotation:
                 # Using label to get number of objects
                 labeled_mask, n_objects = label(class_mask,background=0,return_num=True)
                 for i in range(n_objects):
+
                     # Find contours where labeled mask is equal to i
                     obj_contours = find_contours(labeled_mask==i+1)
                     if len(obj_contours)==1:
                         poly_list = obj_contours[0].tolist()
-                        poly_list = [(int(i[0]),int(i[1])) for i in poly_list]
+                        poly_list = [(int(i[1]),int(i[0])) for i in poly_list]
                     else:
                         # Find the largest one
                         contours_size = [np.shape(i)[0] for i in obj_contours]
                         poly_list = obj_contours[np.argmax(contours_size)].tolist()
-                        poly_list = [(int(i[0]),int(i[1])) for i in poly_list]
+                        poly_list = [(int(i[1]),int(i[0])) for i in poly_list]
 
                     if len(poly_list)>2:
                         # Making polygon from contours 
