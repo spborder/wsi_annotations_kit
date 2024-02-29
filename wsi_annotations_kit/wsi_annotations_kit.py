@@ -21,8 +21,7 @@ from shapely.validation import make_valid
 from skimage.measure import label, find_contours
 import uuid
 
-
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 class Object:
     def __init__(self,
