@@ -14,6 +14,7 @@ from geojson import Feature, dump
 import json
 
 from tqdm import tqdm
+from math import ceil, floor
 
 import shapely
 from shapely.geometry import box, Polygon, shape
@@ -42,7 +43,6 @@ class Object:
             self.structure = 'Structure'
         if self.name is None:
             self.name = uuid.uuid4().hex[:24]
-
 
 class AperioXML:
     def __init__(self,
@@ -389,6 +389,123 @@ class Annotation:
                         # Making polygon from contours 
                         obj_poly = Polygon(poly_list)
                         self.add_shape(obj_poly,box_crs,structure_name)
+
+
+class Patch:
+    def __init__(self,
+                 left,
+                 top,
+                 right,
+                 bottom):
+        
+        self.left = left
+        self.top = top
+        self.right = right
+        self.bottom = bottom
+
+        self.complete_objects = []
+        self.incomplete_objects = []
+
+        
+
+
+
+class AnnotationPatches(Annotation):
+    def __init__(self,
+                 mpp = None,
+                 min_size = None,
+                 clear_edges = False):
+        super().__init__(mpp, min_size)
+
+        self.patch_indices = None
+        self.patch_leftovers = None
+        self.stride = None
+        self.n_patch = None
+
+        # Whether or not to exclude annotations that intersect with the edges (useful if only complete annotations within a region are desired)
+        self.clear_edges = clear_edges
+
+    def add_patch_shape(self, poly, box_crs, structure = None, name = None, properties = None):
+        pass
+
+    def add_patch_mask(self, mask, box_crs, mask_type, structure = None):
+        pass
+    
+    def merge_adjacent(self, patch_1, patch_2):
+        pass
+
+    def find_adjacent(self,patch_top_left):
+        # Taking the top-left coordinates of a patch and finding the patch index coordinates and all adjacent patches
+        pass
+
+    def define_patches(self, region_crs, height, width, patch_height, patch_width, overlap_pct):
+        # Used to increase efficiency, pre-allocating patch coordinates and adjacency
+        # region_crs = [left, top], x,y coordinates for upper left hand portion of the region
+
+        if height <= patch_height and width <= patch_width:
+            # In this case there will be a single patch (0,0)
+            self.patch_indices = np.array([[(region_crs[0],region_crs[1], region_crs[0]+width, region_crs[1]+height)]])
+            self.patch_leftovers = np.empty_like(self.patch_indices)
+            self.n_patch = [1,1]
+            self.stride = [width,height]
+        else:
+
+            # Defining coordinates for each patch and adding to patch_indices array
+            stride_x = int(patch_width*(1-overlap_pct))
+            stride_y = int(patch_height*(1-overlap_pct))
+
+            self.stride = [stride_x, stride_y]
+
+            # Number of patches in each direction (+1 for last patch consisting of remainder)
+            n_patch_x = 1+floor((width-patch_width)/stride_x)
+            n_patch_y = 1+floor((height-patch_height)/stride_y)
+
+            self.n_patch = [n_patch_x,n_patch_y]
+
+            # Defining start coordinates for each direction. This is for same size patches.
+            col_starts = [int(region_crs[0]+(i*stride_x)) for i in range(0,n_patch_x)]
+            row_starts = [int(region_crs[1]+(i*stride_y)) for i in range(0,n_patch_y)]
+
+            # The last patch for each direction. Again, this is the same size as the other patches so there may be higher overlap in the last patches.
+            col_starts.append(int(width-patch_width))
+            row_starts.append(int(height-patch_height))
+
+            # Creating patch_indices array with patch coordinates.
+            self.patch_indices = np.empty((len(row_starts),len(col_starts)))
+            for r_idx,r in enumerate(row_starts):
+                for c_idx,c in enumerate(col_starts):
+                    # coordinates here are left, top, right, bottom
+                    self.patch_indices[r_idx,c_idx] = (c, r, c+patch_width, r+patch_height)
+
+            # Creating patch_leftovers
+            self.patch_leftovers = np.empty_like(self.patch_indices)
+
+
+    def __iter__(self):
+
+        if not self.patch_indices is None:
+            self.patch_idx = [0,0]
+
+            return self
+        else:
+            print('Need to call define_patches first!')
+            raise AttributeError
+
+    def __next__(self):
+
+        if self.patch_idx[0]>=np.shape(self.patch_indices)[0] and self.patch_idx[1]>=np.shape(self.patch_indices)[1]:
+            raise StopIteration
+        else:
+            # Iterating row--> col, vertically downwards and then across
+            if self.patch_idx[0]>=np.shape(self.patch_indices)[0]:
+                self.patch_idx[0] = 0
+                self.patch_idx[1] += 1
+            
+            patch_coordinates = self.patch_indices[self.patch_idx[0],self.patch_idx[1]]
+
+            self.patch_idx[0] += 1
+
+            return patch_coordinates
 
 
 class Converter:
