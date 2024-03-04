@@ -20,6 +20,7 @@ import shapely
 from shapely.geometry import box, Polygon, shape
 from shapely.validation import make_valid
 from skimage.measure import label, find_contours
+from skimage.segmentation import clear_border
 import uuid
 
 #import matplotlib.pyplot as plt
@@ -396,17 +397,27 @@ class Patch:
                  left,
                  top,
                  right,
-                 bottom):
+                 bottom,
+                 patch_index,
+                 edge_direction = None):
         
         self.left = left
         self.top = top
         self.right = right
         self.bottom = bottom
+        self.patch_index = patch_index
+        self.edge_direction = edge_direction
 
-        self.complete_objects = []
-        self.incomplete_objects = []
+        # Determining if this patch is on an edge
+        if self.patch_index[-1]==0:
+            self.edge_patch = True
 
-        
+        else:
+            self.edge_patch = False
+
+        # Storing complete and incomplete objects for each structure
+        self.complete_objects = {}
+        self.incomplete_objects = {}
 
 
 
@@ -417,8 +428,7 @@ class AnnotationPatches(Annotation):
                  clear_edges = False):
         super().__init__(mpp, min_size)
 
-        self.patch_indices = None
-        self.patch_leftovers = None
+        self.patch_list = []
         self.stride = None
         self.n_patch = None
 
@@ -428,8 +438,55 @@ class AnnotationPatches(Annotation):
     def add_patch_shape(self, poly, box_crs, structure = None, name = None, properties = None):
         pass
 
-    def add_patch_mask(self, mask, box_crs, mask_type, structure = None):
-        pass
+    def add_patch_mask(self, mask, patch_obj, mask_type, structure = None):
+
+        # Adding a mask patch, different procedures for whether something is an edge patch or an interior patch
+
+        if mask_type=='one-hot':
+            # Expecting [height,width,classes] shape
+            for cls in range(np.shape(mask)[-1]):
+
+                if not structure is None:
+                    if type(structure)==list:
+                        structure_name = structure[cls]
+                    elif type(structure)==dict:
+                        structure_name = structure[str(cls)]
+                    elif type(structure)==str:
+                        structure_name = structure
+                    else:
+                        print('Invalid "structure" kwarg input')
+                        raise ValueError
+                    
+                class_mask = mask[:,:,cls].copy()
+
+                # Checking for whether or not to clear edges
+                if patch_obj.edge_patch and self.clear_edges:
+
+                    # Determining edge direction to clear
+                    edge_mask = np.zeros_like(class_mask)
+                    # Iterating through different edge directions
+                    for edge in patch_obj.edge_direction:
+                        if edge==0:
+                            edge_mask[0,:] = 1
+                        elif edge==1:
+                            edge_mask[:,0] = 1
+                        elif edge==2:
+                            edge_mask[-1,:] = 1
+                        elif edge==3:
+                            edge_mask[:,-1] = 1
+
+                    # Using edge mask to clear certain borders of the current mask
+                    class_mask = clear_border(class_mask,mask = edge_mask)
+
+                
+
+
+
+
+
+
+
+
     
     def merge_adjacent(self, patch_1, patch_2):
         pass
@@ -441,11 +498,25 @@ class AnnotationPatches(Annotation):
     def define_patches(self, region_crs, height, width, patch_height, patch_width, overlap_pct):
         # Used to increase efficiency, pre-allocating patch coordinates and adjacency
         # region_crs = [left, top], x,y coordinates for upper left hand portion of the region
+        self.region_crs = region_crs
+        self.height = height
+        self.width = width
+        self.patch_height = patch_height
+        self.patch_width = patch_width
+        self.overlap_pct = overlap_pct
 
         if height <= patch_height and width <= patch_width:
-            # In this case there will be a single patch (0,0)
-            self.patch_indices = np.array([[(region_crs[0],region_crs[1], region_crs[0]+width, region_crs[1]+height)]])
-            self.patch_leftovers = np.empty_like(self.patch_indices)
+            # In this case there will be a single patch (0,0) with edges in all directions
+            self.patch_list = [
+                Patch(
+                    left = region_crs[0],
+                    top = region_crs[1],
+                    right = region_crs[0]+width,
+                    bottom = region_crs[1]+height,
+                    patch_index = [0,0],
+                    edge_direction = [0,1,2,3]
+                )
+            ]
             self.n_patch = [1,1]
             self.stride = [width,height]
         else:
@@ -471,15 +542,57 @@ class AnnotationPatches(Annotation):
             row_starts.append(int(height-patch_height))
 
             # Creating patch_indices array with patch coordinates.
-            self.patch_indices = np.empty((len(row_starts),len(col_starts)))
             for r_idx,r in enumerate(row_starts):
                 for c_idx,c in enumerate(col_starts):
-                    # coordinates here are left, top, right, bottom
-                    self.patch_indices[r_idx,c_idx] = (c, r, c+patch_width, r+patch_height)
+                    
+                    # This parameter determines distance from an edge, if it is equal to zero, this is an edge patch.
+                    distance_from_edge = np.minimum((len(row_starts)-1-r_idx),(len(col_starts)-1-c_idx))
+                    if not distance_from_edge==0:
+                        self.patch_list.append(
+                            Patch(
+                                left = c,
+                                top = r,
+                                right = c + self.patch_width,
+                                bottom = r + self.patch_height,
+                                patch_index = [r_idx,c_idx,distance_from_edge]
+                            )
+                        )
+                    else:
+                        if r_idx==0 and c_idx==0:
+                            # top-left corner
+                            edge_direction = [0,1]
+                        elif r_idx==0 and c_idx<len(col_starts)-1:
+                            # top edge
+                            edge_direction = [0]
+                        elif r_idx==0 and c_idx==len(col_starts)-1:
+                            # top-right corner
+                            edge_direction = [0,3]
+                        elif r_idx<len(row_starts)-1 and c_idx==0:
+                            # left edge
+                            edge_direction = [1]
+                        elif r_idx==len(row_starts)-1 and c_idx==0:
+                            # bottom-left corner
+                            edge_direction = [1,2]
+                        elif r_idx==len(row_starts)-1 and c_idx<len(col_starts)-1:
+                            # bottom edge
+                            edge_direction = [2]
+                        elif r_idx==len(row_starts)-1 and c_idx==len(col_starts)-1:
+                            # bottom-right corner
+                            edge_direction = [2,3]
+                        elif r_idx<len(row_starts)-1 and c_idx==len(col_starts)-1:
+                            # right edge
+                            edge_direction = [3]
 
-            # Creating patch_leftovers
-            self.patch_leftovers = np.empty_like(self.patch_indices)
-
+                        self.patch_list.append(
+                            Patch(
+                                left = c,
+                                top = r,
+                                right = c+self.patch_width,
+                                bottom = r+self.patch_height,
+                                patch_index = [r_idx, c_idx, distance_from_edge],
+                                edge_direction = edge_direction
+                            )
+                        )
 
     def __iter__(self):
 
