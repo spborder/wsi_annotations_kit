@@ -900,8 +900,8 @@ class AnnotationPatches(Annotation):
 
     def __iter__(self):
 
-        if not self.patch_indices is None:
-            self.patch_idx = [0,0]
+        if not len(self.patch_list)==0:
+            self.patch_idx = 0
 
             return self
         else:
@@ -910,19 +910,13 @@ class AnnotationPatches(Annotation):
 
     def __next__(self):
 
-        if self.patch_idx[0]>=np.shape(self.patch_indices)[0] and self.patch_idx[1]>=np.shape(self.patch_indices)[1]:
+        if self.patch_index ==len(self.patch_list):
             raise StopIteration
         else:
-            # Iterating row--> col, vertically downwards and then across
-            if self.patch_idx[0]>=np.shape(self.patch_indices)[0]:
-                self.patch_idx[0] = 0
-                self.patch_idx[1] += 1
-            
-            patch_coordinates = self.patch_indices[self.patch_idx[0],self.patch_idx[1]]
+            new_patch = self.patch_list[self.patch_idx]
+            self.patch_idx += 1
 
-            self.patch_idx[0] += 1
-
-            return patch_coordinates
+            return new_patch
 
 
 class Converter:
