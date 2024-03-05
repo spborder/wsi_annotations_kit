@@ -460,7 +460,7 @@ class AnnotationPatches(Annotation):
                 class_mask = mask[:,:,cls].copy()
 
                 # Checking for whether or not to clear edges
-                if patch_obj.edge_patch and self.clear_edges:
+                if patch_obj.edge_patch:
 
                     # Determining edge direction to clear
                     edge_mask = np.zeros_like(class_mask)
@@ -475,10 +475,170 @@ class AnnotationPatches(Annotation):
                         elif edge==3:
                             edge_mask[:,-1] = 1
 
-                    # Using edge mask to clear certain borders of the current mask
-                    class_mask = clear_border(class_mask,mask = edge_mask)
+                    if self.clear_edges:
+                        # Using edge mask to clear certain borders of the current mask
+                        class_mask = clear_border(class_mask,mask = edge_mask)
 
+                # Finding the structures which intersect with other edges (which will be added to "incomplete_structures")
+                cleared_borders = clear_border(class_mask)
+
+                # Edge structures:
+                incomplete_structures = class_mask - cleared_borders
+                # Interior, contained structures
+                complete_structures = cleared_borders.copy()
+
+                labeled_incomplete, n_incomplete = label(incomplete_structures,background = 0, return_num = True)
+                labeled_complete, n_complete = label(complete_structures,background=0,return_num=True)
+
+                # Adding structure list to patch object
+                patch_obj.incomplete_objects[structure_name] = []
+                patch_obj.complete_objects[structure_name] = []
+
+                for i in range(n_incomplete):
+                    # Finding object contours:
+                    obj_contours = find_contours(labeled_incomplete==i+1)
+
+                    if len(obj_contours)==1:
+                        obj_contours = obj_contours[0].tolist()
+                    else:
+                        # Finding the largest one
+                        contours_size = [np.shape(i)[0] for i in obj_contours]
+                        obj_contours = obj_contours[np.argmax(contours_size)].tolist()
+
+                    poly_list = [(int(i[0]),int(i[1])) for i in obj_contours]
+
+                    if len(poly_list)>2:
+                        obj_poly = Polygon(poly_list)
+
+                        patch_obj.incomplete_objects[structure_name].append(
+                            Object(
+                                obj_poly, [patch_obj.left, patch_obj.top], structure_name
+                            )
+                        )
                 
+                # Repeating for complete structures
+                for i in range(n_complete):
+                    obj_contours = find_contours(labeled_complete==i+1)
+
+                    if len(obj_contours)==1:
+                        obj_contours = obj_contours[0].tolist()
+                    else:
+                        # Finding largest one
+                        contours_size = [np.shape(i)[0] for i in obj_contours]
+                        obj_contours = obj_contours[np.argmax(contours_size)].tolist()
+
+                    poly_list = [(int(i[0]),int(i[1])) for i in obj_contours]
+
+                    if len(poly_list)>2:
+                        obj_poly = Polygon(poly_list)
+                        patch_obj.complete_objects[structure_name].append(
+                            Object(
+                                obj_poly, [patch_obj.left, patch_obj.top], structure_name
+                            )
+                        )
+
+        else:
+            # Expecting mask format [height, width]
+            if type(structure)==list:
+                n_struct = len(structure)
+            elif type(structure)==dict:
+                n_struct = len(list(structure.keys()))
+            elif type(structure)==str:
+                n_struct =  1
+            else:
+                raise ValueError
+            
+            for cls in range(n_struct):
+                # Assuming background is set to zero
+                if type(structure)==list:
+                    struct_idx = cls+1
+                    structure_name = structure[cls]
+                elif type(structure)==dict:
+                    struct_idx = structure[list(structure.keys())[cls]]
+                    structure_name = list(structure.keys())[cls]
+                elif type(structure)==str:
+                    struct_idx = 1
+                    structure_name = structure
+                
+                class_mask = (mask.copy()==struct_idx)
+
+                # Checking for whether or not to clear edges
+                if patch_obj.edge_patch:
+
+                    # Determining edge direction to clear
+                    edge_mask = np.zeros_like(class_mask)
+                    # Iterating through different edge directions
+                    for edge in patch_obj.edge_direction:
+                        if edge==0:
+                            edge_mask[0,:] = 1
+                        elif edge==1:
+                            edge_mask[:,0] = 1
+                        elif edge==2:
+                            edge_mask[-1,:] = 1
+                        elif edge==3:
+                            edge_mask[:,-1] = 1
+
+                    if self.clear_edges:
+                        class_mask = clear_border(class_mask, mask = edge_mask)
+
+                # Finding the structures which intersect with other edges
+                cleared_borders = clear_border(class_mask)
+
+                # Edge structures:
+                incomplete_structures = class_mask - cleared_borders
+                # Interior, contained structures
+                complete_structures = cleared_borders.copy()
+
+                labeled_incomplete, n_incomplete = label(incomplete_structures, background = 0, return_num=True)
+                labeled_complete, n_complete = label(complete_structures, background = 0, return_num = True)
+
+                # Adding structure list to patch object
+                patch_obj.incomplete_objects[structure_name] = []
+                patch_obj.complete_objects[structure_name] = []
+
+                for i in range(n_incomplete):
+                    obj_contours = find_contours(labeled_incomplete==i+1)
+
+                    if len(obj_contours)==1:
+                        obj_contours = obj_contours[0].tolist()
+                    else:
+                        # Finding the largest object
+                        contours_size = [np.shape(i)[0] for i in obj_contours]
+                        obj_contours = obj_contours[np.argmax(contours_size)].tolist()
+
+                    poly_list = [(int(i[1]),int(i[0])) for i in obj_contours]
+
+                    if len(poly_list)>2:
+                        obj_poly = Polygon(poly_list)
+
+                        patch_obj.incomplete_objects[structure_name].append(
+                            Object(
+                                obj_poly, [patch_obj.left, patch_obj.top], structure_name
+                            )
+                        )
+
+                # Repeating for complete structures
+                for i in range(n_complete):
+                    obj_contours = find_contours(labeled_complete==i+1)
+
+                    if len(obj_contours)==1:
+                        obj_contours = obj_contours[0].tolist()
+                    else:
+                        # Finding the largest object
+                        contours_size = [np.shape(i)[0] for i in obj_contours]
+                        obj_contours = obj_contours[np.argmax(contours_size)].tolist()
+
+
+                    poly_list = [(i[1],i[0]) for i in obj_contours]
+
+                    if len(poly_list)>2:
+                        obj_poly = Polygon(poly_list)
+
+                        patch_obj.complete_objects[structure_name].append(
+                            Object(
+                                obj_poly, [patch_obj.left, patch_obj.top], structure_name
+                            )
+                        )
 
 
 
