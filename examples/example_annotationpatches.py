@@ -13,7 +13,7 @@ from PIL import Image
 
 sys.path.append('..')
 import wsi_annotations_kit.wsi_annotations_kit.wsi_annotations_kit as wak
-
+print(dir(wak))
 
 def preprocess_mask(mask_image,mask_type):
 
@@ -44,7 +44,7 @@ def main():
     # Loading example object mask
     test_image_path = './examples/test_image.png'
     test_image_mask = np.array(Image.open(test_image_path))
-    test_mask_type = 'non-one-hot'
+    test_mask_type = 'binary'
 
     # Preprocessing mask to be in either one-hot or class label format
     processed_mask = preprocess_mask(test_image_mask,test_mask_type)
@@ -66,8 +66,9 @@ def main():
     annotation.geojson_save('./examples/test_geojson.geojson')
     annotation.json_save('./examples/test_json.json')
 
+    print(np.shape(processed_mask))
     # Now doing the same thing but using the AnnotationPatches method
-    patch_annotation = wak.AnnotationPatches()
+    patch_annotation = wak.AnnotationPatches(clear_edges = False)
     # Pre-define patches according to desired criteria
     patch_annotation.define_patches(
         region_crs = [0,0],
@@ -75,8 +76,10 @@ def main():
         width = np.shape(processed_mask)[1],
         patch_height = 256,
         patch_width = 256,
-        overlap_pct = 0.25
+        overlap_pct = 0.5
     )
+
+    print(len(patch_annotation.patch_list))
 
     # Start patch iterator
     patch_annotation = iter(patch_annotation)
@@ -85,6 +88,7 @@ def main():
         try:
             # Get region of a given patch using __next__()
             new_patch = next(patch_annotation)
+            print(new_patch)
             mask_region = processed_mask[new_patch.top:new_patch.bottom, new_patch.left:new_patch.right]
 
             # Add specified region of the mask to total annotations
@@ -99,7 +103,8 @@ def main():
             keep_iterating = False
 
     # Clean up incomplete objects on the edges of patches
-    patch_annotation.clean_patches()
+    patch_annotation.clean_patches(merge_method = 'union')
+    patch_annotation.write_patches()
 
     # Save annotation to text file
     patch_annotation.xml_save('./examples/patch_test_xml.xml')

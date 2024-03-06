@@ -24,7 +24,7 @@ from skimage.measure import label, find_contours
 from skimage.segmentation import clear_border
 import uuid
 
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 class Object:
     def __init__(self,
@@ -421,6 +421,8 @@ class Patch:
         self.incomplete_objects = {}
 
         self.n_incomplete = 0
+    def __str__(self):
+        return f'Patch at: {self.left}, {self.top}, {self.right}, {self.bottom}'
 
 
 
@@ -432,6 +434,7 @@ class AnnotationPatches(Annotation):
         super().__init__(mpp, min_size)
 
         self.patch_list = []
+        self.processed_patch_list = []
         self.stride = None
         self.n_patch = None
 
@@ -472,23 +475,33 @@ class AnnotationPatches(Annotation):
     def add_patch_mask(self, mask, patch_obj, mask_type, structure = None):
 
         # Adding a mask patch, different procedures for whether something is an edge patch or an interior patch
-
-        if mask_type=='one-hot':
+        # Can have 'one-hot-labeled' or 'labeled-one-hot' to specify different objects within a structure that intersect
+        if 'one-hot' in mask_type:
             # Expecting [height,width,classes] shape
             for cls in range(np.shape(mask)[-1]):
 
                 if not structure is None:
                     if type(structure)==list:
                         structure_name = structure[cls]
+
                     elif type(structure)==dict:
                         structure_name = structure[str(cls)]
+
                     elif type(structure)==str:
                         structure_name = structure
                     else:
                         print('Invalid "structure" kwarg input')
                         raise ValueError
-                    
-                class_mask = mask[:,:,cls].copy()
+                
+                if structure_name not in self.structure_names:
+                    self.objects[structure_name] = []
+                    self.structure_names.append(structure_name)
+                class_mask = np.uint8(mask[:,:,cls].copy())
+
+                # If individual objects in this structure are already labeled (objects which are touching would otherwise be merged)
+                if 'labeled' in mask_type:
+                    label_copy = class_mask.copy()
+                    class_mask = np.uint8(label_copy>0)
 
                 # Checking for whether or not to clear edges
                 if patch_obj.edge_patch:
@@ -518,16 +531,23 @@ class AnnotationPatches(Annotation):
                 # Interior, contained structures
                 complete_structures = cleared_borders.copy()
 
-                labeled_incomplete, n_incomplete = label(incomplete_structures,background = 0, return_num = True)
-                labeled_complete, n_complete = label(complete_structures,background=0,return_num=True)
+                if not 'labeled' in mask_type:
+                    labeled_incomplete, n_incomplete = label(incomplete_structures,background = 0, return_num = True)
+                    labeled_complete, n_complete = label(complete_structures,background=0,return_num=True)
+                else:
+                    labeled_incomplete = incomplete_structures * label_copy
+                    n_incomplete = len(np.unique(labeled_incomplete))-1
+                    labeled_complete = complete_structures * label_copy
+                    n_incomplete = len(np.unique(labeled_complete))-1
+
 
                 # Adding structure list to patch object
                 patch_obj.incomplete_objects[structure_name] = []
                 patch_obj.complete_objects[structure_name] = []
 
-                for i in range(n_incomplete):
+                for i in np.unique(labeled_incomplete).tolist()[1:]:
                     # Finding object contours:
-                    obj_contours = find_contours(labeled_incomplete==i+1)
+                    obj_contours = find_contours(labeled_incomplete==i)
 
                     if len(obj_contours)==1:
                         obj_contours = obj_contours[0].tolist()
@@ -548,8 +568,8 @@ class AnnotationPatches(Annotation):
                         )
                 
                 # Repeating for complete structures
-                for i in range(n_complete):
-                    obj_contours = find_contours(labeled_complete==i+1)
+                for i in np.unique(labeled_complete).tolist()[1:]:
+                    obj_contours = find_contours(labeled_complete==i)
 
                     if len(obj_contours)==1:
                         obj_contours = obj_contours[0].tolist()
@@ -572,10 +592,23 @@ class AnnotationPatches(Annotation):
             # Expecting mask format [height, width]
             if type(structure)==list:
                 n_struct = len(structure)
+                for s in structure:
+                    if s not in self.structure_names:
+                        self.objects[s] = []
+                        self.structure_names.append(s)
+
             elif type(structure)==dict:
                 n_struct = len(list(structure.keys()))
+                for s in list(structure.keys()):
+                    if s not in self.structure_names:
+                        self.objects[s] = []
+                        self.structure_names.append(s)
+
             elif type(structure)==str:
                 n_struct =  1
+                if s not in self.structure_names:
+                    self.objects[structure] = []
+                    self.structure_names.append(structure)
             else:
                 raise ValueError
             
@@ -591,133 +624,124 @@ class AnnotationPatches(Annotation):
                     struct_idx = 1
                     structure_name = structure
                 
-                class_mask = (mask.copy()==struct_idx)
+                class_mask = np.uint8(mask.copy()==struct_idx)
+                if len(np.unique(class_mask).tolist())>1:
+                    # Checking for whether or not to clear edges
+                    if patch_obj.edge_patch:
 
-                # Checking for whether or not to clear edges
-                if patch_obj.edge_patch:
+                        # Determining edge direction to clear
+                        edge_mask = np.zeros_like(class_mask)
+                        # Iterating through different edge directions
+                        for edge in patch_obj.edge_direction:
+                            if edge==0:
+                                edge_mask[0,:] = 1
+                            elif edge==1:
+                                edge_mask[:,0] = 1
+                            elif edge==2:
+                                edge_mask[-1,:] = 1
+                            elif edge==3:
+                                edge_mask[:,-1] = 1
 
-                    # Determining edge direction to clear
-                    edge_mask = np.zeros_like(class_mask)
-                    # Iterating through different edge directions
-                    for edge in patch_obj.edge_direction:
-                        if edge==0:
-                            edge_mask[0,:] = 1
-                        elif edge==1:
-                            edge_mask[:,0] = 1
-                        elif edge==2:
-                            edge_mask[-1,:] = 1
-                        elif edge==3:
-                            edge_mask[:,-1] = 1
+                        if self.clear_edges:
+                            class_mask = np.uint8(clear_border(class_mask, mask = edge_mask>0))
 
-                    if self.clear_edges:
-                        class_mask = clear_border(class_mask, mask = edge_mask)
+                    # Finding the structures which intersect with other edges
+                    cleared_borders = clear_border(class_mask)
 
-                # Finding the structures which intersect with other edges
-                cleared_borders = clear_border(class_mask)
+                    # Edge structures:
+                    incomplete_structures = class_mask - cleared_borders
+                    # Interior, contained structures
+                    complete_structures = cleared_borders.copy()
 
-                # Edge structures:
-                incomplete_structures = class_mask - cleared_borders
-                # Interior, contained structures
-                complete_structures = cleared_borders.copy()
+                    labeled_incomplete, n_incomplete = label(incomplete_structures, background = 0, return_num=True)
+                    labeled_complete, n_complete = label(complete_structures, background = 0, return_num = True)
 
-                labeled_incomplete, n_incomplete = label(incomplete_structures, background = 0, return_num=True)
-                labeled_complete, n_complete = label(complete_structures, background = 0, return_num = True)
+                    # Adding structure list to patch object
+                    patch_obj.incomplete_objects[structure_name] = []
+                    patch_obj.complete_objects[structure_name] = []
 
-                # Adding structure list to patch object
-                patch_obj.incomplete_objects[structure_name] = []
-                patch_obj.complete_objects[structure_name] = []
+                    if len(np.unique(labeled_incomplete).tolist())>1:
+                        for i in np.unique(labeled_incomplete).tolist()[1:]:
+                            obj_contours = find_contours(np.float32(labeled_incomplete==i))
 
-                for i in range(n_incomplete):
-                    obj_contours = find_contours(labeled_incomplete==i+1)
+                            for cont in obj_contours:
+                                poly_list = [(int(i[1]+patch_obj.left),int(i[0]+patch_obj.top)) for i in cont]
 
-                    if len(obj_contours)==1:
-                        obj_contours = obj_contours[0].tolist()
-                    else:
-                        # Finding the largest object
-                        contours_size = [np.shape(i)[0] for i in obj_contours]
-                        obj_contours = obj_contours[np.argmax(contours_size)].tolist()
+                                if len(poly_list)>2:
+                                    obj_poly = Polygon(poly_list)
 
-                    poly_list = [(int(i[1]+patch_obj.left),int(i[0]+patch_obj.top)) for i in obj_contours]
+                                    if obj_poly.area>1:
+                                        patch_obj.incomplete_objects[structure_name].append(
+                                            Object(
+                                                obj_poly, [0,0], structure_name, None, None
+                                            )
+                                        )
 
-                    if len(poly_list)>2:
-                        obj_poly = Polygon(poly_list)
+                    if len(np.unique(labeled_complete).tolist())>1:
+                        # Repeating for complete structures
+                        for i in np.unique(labeled_complete).tolist()[1:]:
+                            obj_contours = find_contours(labeled_complete==i)
 
-                        patch_obj.incomplete_objects[structure_name].append(
-                            Object(
-                                obj_poly, [0,0], structure_name
-                            )
-                        )
+                            for cont in obj_contours:
 
-                # Repeating for complete structures
-                for i in range(n_complete):
-                    obj_contours = find_contours(labeled_complete==i+1)
+                                poly_list = [(int(i[1]+patch_obj.left),int(i[0]+patch_obj.top)) for i in cont]
 
-                    if len(obj_contours)==1:
-                        obj_contours = obj_contours[0].tolist()
-                    else:
-                        # Finding the largest object
-                        contours_size = [np.shape(i)[0] for i in obj_contours]
-                        obj_contours = obj_contours[np.argmax(contours_size)].tolist()
-
-
-                    poly_list = [(int(i[1]+patch_obj.left),int(i[0]+patch_obj.top)) for i in obj_contours]
-
-                    if len(poly_list)>2:
-                        obj_poly = Polygon(poly_list)
-
-                        patch_obj.complete_objects[structure_name].append(
-                            Object(
-                                obj_poly, [0,0], structure_name
-                            )
-                        )
+                                if len(poly_list)>2:
+                                    obj_poly = Polygon(poly_list)
+                                    if obj_poly.area>1:
+                                        patch_obj.complete_objects[structure_name].append(
+                                            Object(
+                                                obj_poly, [0,0], structure_name, None, None
+                                            )
+                                        )
 
         # Adding number of incomplete objects for each structure to the patch object
         patch_obj.n_incomplete += sum([len(patch_obj.incomplete_objects[i]) for i in patch_obj.incomplete_objects])
 
-        self.patch_list.append(patch_obj)
+        self.processed_patch_list.append(patch_obj)
 
     def find_adjacent(self,patch_index):
         # Patch index, mixed with self.n_neighbors returns all possible intersecting patch indices
         neighbor_patches = []
-        
         # Negative neighbors:
         for n_x in range(1,self.n_neighbors+1):
             for n_y in range(1,self.n_neighbors+1):
                 if patch_index[0]-n_y>=0:
                     if patch_index[1]-n_x>=0:
-                        
-                        distance_from_edge = np.minimum((self.n_patch[1]-1-(patch_index[0]-n_y)),(self.n_patch[0]-1-(patch_index[1]-n_x)))
+                        distance_from_edge = np.minimum((self.n_patch[0]-1-(patch_index[0]-n_y)),(self.n_patch[1]-1-(patch_index[1]-n_x)))
 
                         neighbor_patches.append([patch_index[0]-n_y, patch_index[1]-n_x,distance_from_edge])
 
         # Positive neighbors: 
         for n_x in range(1,self.n_neighbors+1):
             for n_y in range(1,self.n_neighbors+1):
-                if patch_index[0]+n_y<=self.n_patch[1]:
-                    if patch_index[1]+n_x<=self.n_patch[0]:
-                        distance_from_edge = np.minimum((self.n_patch[1]-1-(patch_index[0]+n_y)),(self.n_patch[0]-1-(patch_index[1]+n_x)))
+                if patch_index[0]+n_y<=self.n_patch[0]:
+                    if patch_index[1]+n_x<=self.n_patch[1]:
+                        distance_from_edge = np.minimum((self.n_patch[0]-1-(patch_index[0]+n_y)),(self.n_patch[1]-1-(patch_index[1]+n_x)))
 
-                        neighbor_patches.append([patch_index[0]+n_y, patch_index[1]+n_x])
+                        neighbor_patches.append([patch_index[0]+n_y, patch_index[1]+n_x, distance_from_edge])
 
         return neighbor_patches
 
     def clean_patches(self, merge_method = 'union'):
-
+        
         # First adding all the complete objects for each patch
-        for patch in self.patch_list:
+        pre_objects = {}
+        for patch in self.processed_patch_list:
             complete_structures = list(patch.complete_objects.keys())
             for s in complete_structures:
-                if s not in self.objects:
-                    self.objects[s] = []
-                    self.structure_names.append(s)
+                if s not in pre_objects:
+                    pre_objects[s] = []
+                    if s not in self.structure_names:
+                        self.objects[s] = []
+                        self.structure_names.append(s)
                 
-                self.objects[s].extend([
+                pre_objects[s].extend([
                     Object(
-                        p, [0,0], s, None, {'merged': False}
+                        p.poly.simplify(0.5,preserve_topology=False), [0,0], s, None, None
                     )
-                    for i in patch.complete_objects[s]
+                    for p in patch.complete_objects[s]
                 ])
-
 
         # Post-processing annotations, merging intersecting, incomplete annotations from adjacent patches
         all_patches_with_incomplete = [i for i in self.patch_list if i.n_incomplete>0]
@@ -732,24 +756,48 @@ class AnnotationPatches(Annotation):
             intersecting_groups.append([base_patch]+[i for i in all_patches_with_incomplete if i.patch_index in possible_neighbors])
         
         # Possibly not the most efficient method
-        for group in intersecting_groups:
-
+        for g_idx,group in enumerate(intersecting_groups):
             # Getting the structures which have incomplete objects within each patch in a group
             structures_with_incomplete = []
             for p in group:
                 incomplete_structures = [i for i in p.incomplete_objects if len(p.incomplete_objects[i])>0]
                 structures_with_incomplete.append(incomplete_structures)
             
-            unique_structures = np.unique(*structures_with_incomplete).tolist()
-            for u in unique_structures:
+            unique_structures = self.structure_names
+            for u_idx,u in enumerate(unique_structures):
                 # Getting all the patches in the group which also have incomplete objects for that structure
                 p_with_u = [group[i] for i in range(len(group)) if u in structures_with_incomplete[i]]
 
                 # Now getting incomplete objects for that structure in this sub-group and finding the ones that intersect
                 incomplete_objects_in_structure = []
-                for pu in p_with_u:
-                    incomplete_objects_in_structure.extend([i.poly for i in pu.incomplete_objects[u]])
+                for pu_idx,pu in enumerate(p_with_u):
+                    #print(f'group: {g_idx}/{len(intersecting_groups)}, structure: {u_idx}/{len(unique_structures)}, patch: {pu_idx}/{len(p_with_u)}')
+                    #complete_objects = [i.poly for i in pre_objects[u]]
+                    for i in pu.incomplete_objects[u]:
+                        if i.poly.buffer(0).is_valid:
+                            """
+                            if any([i.poly.buffer(0).intersects(j) for j in complete_objects]):
+                                combination = unary_union(unary_union([co for co in complete_objects if co.intersects(i.poly.buffer(0))]+[i.poly.buffer(1)]))
+                                if combination.geom_type=='Polygon':
+                                    incomplete_objects_in_structure.append(combination)
+                                elif combination.geom_type=='MultiPolygon':
+                                    combined_coords = []
+                                    for piece in combination.geoms:
+                                        combined_coords.extend(list(piece.exterior.coords))
+                                    incomplete_objects_in_structure.append(make_valid(Polygon(combined_coords)))
+                            else:
+                                incomplete_objects_in_structure.append(i.poly.buffer(0))
+                            """
+                            incomplete_objects_in_structure.append(i.poly.buffer(0))
 
+                pre_objects[u].extend([
+                    Object(
+                        inc.buffer(1), [0,0], u, None, {'merged': True}
+                    )
+                    for inc in incomplete_objects_in_structure
+                ])
+
+                """
                 # Merging structures which overlap (test)
                 if merge_method=='union':
                     merged_incomplete_structures = unary_union(incomplete_objects_in_structure)
@@ -765,29 +813,71 @@ class AnnotationPatches(Annotation):
                     print('Choose from: union, envelope, minimum_rotated_rectangle, or convex_hull')
                     raise ValueError
 
-
-
-                if merged_incomplete_structures.geom_type=='MultiPolygon':
+                if merged_incomplete_structures.geom_type=='Polygon':
+                    pre_objects[u].append(
+                        Object(
+                            merged_incomplete_structures, [0,0], u, None, {'merged': True}
+                        )
+                    )
+                elif merged_incomplete_structures.geom_type=='MultiPolygon':
                     # Iterating through and adding each polygon
                     for obj in merged_incomplete_structures.geoms:
-                        self.objects[u].append(
+                        pre_objects[u].append(
                             Object(
                                 obj, [0,0], u, None, {'merged': True}
                             )
                         )
                 elif merged_incomplete_structures.geom_type=='GeometryCollection':
                     # only add the polygons
-                    for obj in merged_incomplete_structures:
+                    for obj in merged_incomplete_structures.geoms:
                         if obj.geom_type=='Polygon':
-                            self.objects[u].append(
+                            pre_objects[u].append(
                                 Object(
                                     obj, [0,0], u, None, {'merged': True}
                                 )
                             )
+                """
+        # Making sure all structures in pre_objects are added:
+        for structure in pre_objects:
+            # Merging structures which overlap (test)
+            if merge_method=='union':
+                merged_objects = unary_union([i.poly.buffer(0) for i in pre_objects[structure] if i.poly.buffer(0).is_valid])
+            elif merge_method=='envelope':
+                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in pre_objects[structure] if i.poly.buffer(0).is_valid]).envelope
+            elif merge_method=='minimum_rotated_rectangle':
+                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in pre_objects[structure] if i.poly.buffer(0).is_valid]).minimum_rotated_rectangle
+            elif merge_method=='convex_hull':
+                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in pre_objects[structure] if i.poly.buffer(0).is_valid]).convex_hull
 
-                #TODO: Make sure the assembled incomplete annotations don't intersect with a complete annotation. Once something is complete, just keep it complete.
-
-        #TODO: Check if completed incomplete objects intersect/equal complete objects already in self.objects
+            else:
+                print('Invalid merge_method')
+                print('Choose from: union, envelope, minimum_rotated_rectangle, or convex_hull')
+                raise ValueError
+            
+            # Adding objects finally
+            if merged_objects.geom_type=='Polygon':
+                self.objects[structure].append(
+                    Object(
+                        merged_objects.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
+                    )
+                )
+            elif merged_objects.geom_type=='MultiPolygon':
+                # Iterating through and adding each polygon
+                for obj in merged_objects.geoms:
+                    self.objects[structure].append(
+                        Object(
+                            obj.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
+                        )
+                    )
+            elif merged_objects.geom_type=='GeometryCollection':
+                # only add the polygons
+                for obj in merged_objects.geoms:
+                    if obj.geom_type=='Polygon':
+                        self.objects[structure].append(
+                            Object(
+                                obj.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
+                            )
+                        )
 
     def define_patches(self, region_crs, height, width, patch_height, patch_width, overlap_pct):
         # Used to increase efficiency, pre-allocating patch coordinates and adjacency
@@ -835,8 +925,6 @@ class AnnotationPatches(Annotation):
             n_patch_x = 1+floor((width-patch_width)/stride_x)
             n_patch_y = 1+floor((height-patch_height)/stride_y)
 
-            self.n_patch = [n_patch_x,n_patch_y]
-
             # Defining start coordinates for each direction. This is for same size patches.
             col_starts = [int(region_crs[0]+(i*stride_x)) for i in range(0,n_patch_x)]
             row_starts = [int(region_crs[1]+(i*stride_y)) for i in range(0,n_patch_y)]
@@ -844,6 +932,8 @@ class AnnotationPatches(Annotation):
             # The last patch for each direction. Again, this is the same size as the other patches so there may be higher overlap in the last patches.
             col_starts.append(int(width-patch_width))
             row_starts.append(int(height-patch_height))
+
+            self.n_patch = [len(row_starts),len(col_starts)]
 
             # Creating patch_indices array with patch coordinates.
             for r_idx,r in enumerate(row_starts):
@@ -898,6 +988,25 @@ class AnnotationPatches(Annotation):
                             )
                         )
 
+    def write_patches(self):
+        
+        # Adding patches to current objects
+        if 'Patches' not in self.structure_names:
+            self.objects['Patches'] = []
+            self.structure_names.append('Patches')
+        
+        for p in self.patch_list:
+
+            self.objects['Patches'].append(
+                Object(
+                    shape_structure = box(p.left, p.top, p.right, p.bottom),
+                    location = [0,0],
+                    structure_name = 'Patches',
+                    name = None,
+                    properties = None
+                )
+            )
+
     def __iter__(self):
 
         if not len(self.patch_list)==0:
@@ -910,7 +1019,7 @@ class AnnotationPatches(Annotation):
 
     def __next__(self):
 
-        if self.patch_index ==len(self.patch_list):
+        if self.patch_idx ==len(self.patch_list):
             raise StopIteration
         else:
             new_patch = self.patch_list[self.patch_idx]
