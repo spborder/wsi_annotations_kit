@@ -650,6 +650,7 @@ class AnnotationPatches(Annotation):
 
                     # Edge structures:
                     incomplete_structures = class_mask - cleared_borders
+
                     # Interior, contained structures
                     complete_structures = cleared_borders.copy()
 
@@ -661,6 +662,7 @@ class AnnotationPatches(Annotation):
                     patch_obj.complete_objects[structure_name] = []
 
                     if len(np.unique(labeled_incomplete).tolist())>1:
+                        
                         for i in np.unique(labeled_incomplete).tolist()[1:]:
                             obj_contours = find_contours(np.float32(labeled_incomplete==i))
 
@@ -670,12 +672,13 @@ class AnnotationPatches(Annotation):
                                 if len(poly_list)>2:
                                     obj_poly = Polygon(poly_list)
 
-                                    if obj_poly.area>1:
+                                    if obj_poly.area>1 and obj_poly.is_valid:
                                         patch_obj.incomplete_objects[structure_name].append(
                                             Object(
                                                 obj_poly, [0,0], structure_name, None, None
                                             )
                                         )
+                    
 
                     if len(np.unique(labeled_complete).tolist())>1:
                         # Repeating for complete structures
@@ -688,7 +691,7 @@ class AnnotationPatches(Annotation):
 
                                 if len(poly_list)>2:
                                     obj_poly = Polygon(poly_list)
-                                    if obj_poly.area>1:
+                                    if obj_poly.area>1 and obj_poly.is_valid:
                                         patch_obj.complete_objects[structure_name].append(
                                             Object(
                                                 obj_poly, [0,0], structure_name, None, None
@@ -702,24 +705,20 @@ class AnnotationPatches(Annotation):
 
     def find_adjacent(self,patch_index):
         # Patch index, mixed with self.n_neighbors returns all possible intersecting patch indices
+        #print(f'base_patch index: {patch_index}')
         neighbor_patches = []
-        # Negative neighbors:
-        for n_x in range(1,self.n_neighbors+1):
-            for n_y in range(1,self.n_neighbors+1):
-                if patch_index[0]-n_y>=0:
-                    if patch_index[1]-n_x>=0:
-                        distance_from_edge = np.minimum((self.n_patch[0]-1-(patch_index[0]-n_y)),(self.n_patch[1]-1-(patch_index[1]-n_x)))
-
-                        neighbor_patches.append([patch_index[0]-n_y, patch_index[1]-n_x,distance_from_edge])
-
-        # Positive neighbors: 
-        for n_x in range(1,self.n_neighbors+1):
-            for n_y in range(1,self.n_neighbors+1):
-                if patch_index[0]+n_y<=self.n_patch[0]:
-                    if patch_index[1]+n_x<=self.n_patch[1]:
-                        distance_from_edge = np.minimum((self.n_patch[0]-1-(patch_index[0]+n_y)),(self.n_patch[1]-1-(patch_index[1]+n_x)))
+        for n_x in range(-(self.n_neighbors),(self.n_neighbors+1)):
+            for n_y in range(-(self.n_neighbors),(self.n_neighbors+1)):
+                if patch_index[0]+n_y>=0 and patch_index[0]+n_y<self.n_patch[0]:
+                    if patch_index[1]+n_x>=0 and patch_index[1]+n_x<self.n_patch[1]:
+                        if patch_index[0]+n_y==0 or patch_index[1]+n_x==0:
+                            distance_from_edge = 0
+                        else:
+                            distance_from_edge = np.minimum((self.n_patch[0]-1-(patch_index[0]+n_y)),(self.n_patch[1]-1-(patch_index[1]+n_x)))
 
                         neighbor_patches.append([patch_index[0]+n_y, patch_index[1]+n_x, distance_from_edge])
+
+        #print(f'neighboring patches: {neighbor_patches}')
 
         return neighbor_patches
 
@@ -730,6 +729,7 @@ class AnnotationPatches(Annotation):
         for patch in self.processed_patch_list:
             complete_structures = list(patch.complete_objects.keys())
             for s in complete_structures:
+                #print(f'structure: {s} has: {len(patch.complete_objects[s])} complete structures')
                 if s not in pre_objects:
                     pre_objects[s] = []
                     if s not in self.structure_names:
@@ -753,18 +753,25 @@ class AnnotationPatches(Annotation):
             # Finding the neighbors for this patch
             possible_neighbors = self.find_adjacent(base_patch.patch_index)
             # This is a group of that incomplete patch and all its possible neighbors with incomplete objects
-            intersecting_groups.append([base_patch]+[i for i in all_patches_with_incomplete if i.patch_index in possible_neighbors])
+            #intersecting_groups.append([base_patch]+[i for i in all_patches_with_incomplete if i.patch_index in possible_neighbors])
+            intersecting_groups.append([base_patch]+[i for i in self.patch_list if i.patch_index in possible_neighbors])
         
         # Possibly not the most efficient method
+        inc_pre_objects = {}
         for g_idx,group in enumerate(intersecting_groups):
             # Getting the structures which have incomplete objects within each patch in a group
             structures_with_incomplete = []
+            all_incomplete_structures = []
             for p in group:
                 incomplete_structures = [i for i in p.incomplete_objects if len(p.incomplete_objects[i])>0]
                 structures_with_incomplete.append(incomplete_structures)
+                all_incomplete_structures.extend(incomplete_structures)
             
-            unique_structures = self.structure_names
+            unique_structures = np.unique(all_incomplete_structures)
             for u_idx,u in enumerate(unique_structures):
+                if u not in inc_pre_objects:
+                    inc_pre_objects[u] = []
+
                 # Getting all the patches in the group which also have incomplete objects for that structure
                 p_with_u = [group[i] for i in range(len(group)) if u in structures_with_incomplete[i]]
 
@@ -772,71 +779,59 @@ class AnnotationPatches(Annotation):
                 incomplete_objects_in_structure = []
                 for pu_idx,pu in enumerate(p_with_u):
                     #print(f'group: {g_idx}/{len(intersecting_groups)}, structure: {u_idx}/{len(unique_structures)}, patch: {pu_idx}/{len(p_with_u)}')
-                    #complete_objects = [i.poly for i in pre_objects[u]]
                     for i in pu.incomplete_objects[u]:
                         if i.poly.buffer(0).is_valid:
-                            """
-                            if any([i.poly.buffer(0).intersects(j) for j in complete_objects]):
-                                combination = unary_union(unary_union([co for co in complete_objects if co.intersects(i.poly.buffer(0))]+[i.poly.buffer(1)]))
-                                if combination.geom_type=='Polygon':
-                                    incomplete_objects_in_structure.append(combination)
-                                elif combination.geom_type=='MultiPolygon':
-                                    combined_coords = []
-                                    for piece in combination.geoms:
-                                        combined_coords.extend(list(piece.exterior.coords))
-                                    incomplete_objects_in_structure.append(make_valid(Polygon(combined_coords)))
-                            else:
-                                incomplete_objects_in_structure.append(i.poly.buffer(0))
-                            """
-                            incomplete_objects_in_structure.append(i.poly.buffer(0))
+                            # Not adding incomplete objects that intersect with complete objects
+                            if not any([i.poly.buffer(0).intersects(j.poly) for j in pre_objects[u]]):
+                                if any([i.poly.buffer(0).overlaps(j) for j in incomplete_objects_in_structure]):
+                                    combination = unary_union([i.poly.buffer(0)]+incomplete_objects_in_structure)
+                                    if combination.geom_type=='Polygon':
+                                        incomplete_objects_in_structure.append(combination)
+                                    elif combination.geom_type=='MultiPolygon':
+                                        for piece in combination.geoms:
+                                            incomplete_objects_in_structure.append(piece)
+                                    elif combination.geom_type=='GeometryCollection':
+                                        for piece in combination.geoms:
+                                            if piece.geom_type=='Polygon':
+                                                incomplete_objects_in_structure.append(piece)
+                                else:
+                                    incomplete_objects_in_structure.append(i.poly.buffer(0))
 
-                pre_objects[u].extend([
+                        else:
+                            valid_poly = make_valid(i.poly.buffer(0))
+                            if not any([valid_poly.intersects(j.poly) for j in pre_objects[u]]):
+                                if any([valid_poly.overlaps(j) for j in incomplete_objects_in_structure]):
+                                    combination = unary_union([valid_poly]+incomplete_objects_in_structure)
+                                    if combination.geom_type=='Polygon':
+                                        incomplete_objects_in_structure.append(combination)
+                                    elif combination.geom_type=='MultiPolygon':
+                                        for piece in combination.geoms:
+                                            incomplete_objects_in_structure.append(piece)
+                                    elif combination.geom_type=='GeometryCollection':
+                                        for piece in combination.geoms:
+                                            if piece.geom_type=='Polygon':
+                                                incomplete_objects_in_structure.append(piece)
+                                else:
+                                    incomplete_objects_in_structure.append(i.poly.buffer(0))
+
+                inc_pre_objects[u].extend([
                     Object(
-                        inc.buffer(1), [0,0], u, None, {'merged': True}
+                        inc, [0,0], u, None, None
                     )
                     for inc in incomplete_objects_in_structure
                 ])
 
-                """
-                # Merging structures which overlap (test)
-                if merge_method=='union':
-                    merged_incomplete_structures = unary_union(incomplete_objects_in_structure)
-                elif merge_method=='envelope':
-                    merged_incomplete_structures = shapely.MultiPolygon(incomplete_objects_in_structure).envelope
-                elif merge_method=='minimum_rotated_rectangle':
-                    merged_incomplete_structures = shapely.MultiPolygon(incomplete_objects_in_structure).minimum_rotated_rectangle
-                elif merge_method=='convex_hull':
-                    merged_incomplete_structures = shapely.MultiPolygon(incomplete_objects_in_structure).convex_hull
-
-                else:
-                    print('Invalid merge_method')
-                    print('Choose from: union, envelope, minimum_rotated_rectangle, or convex_hull')
-                    raise ValueError
-
-                if merged_incomplete_structures.geom_type=='Polygon':
-                    pre_objects[u].append(
-                        Object(
-                            merged_incomplete_structures, [0,0], u, None, {'merged': True}
-                        )
+        # Adding merged, non-overlapping incomplete structures
+        for st in self.structure_names:
+            if st in inc_pre_objects:
+                pre_objects[st].extend([
+                    Object(
+                        i.poly,[0,0],st,None,None
                     )
-                elif merged_incomplete_structures.geom_type=='MultiPolygon':
-                    # Iterating through and adding each polygon
-                    for obj in merged_incomplete_structures.geoms:
-                        pre_objects[u].append(
-                            Object(
-                                obj, [0,0], u, None, {'merged': True}
-                            )
-                        )
-                elif merged_incomplete_structures.geom_type=='GeometryCollection':
-                    # only add the polygons
-                    for obj in merged_incomplete_structures.geoms:
-                        if obj.geom_type=='Polygon':
-                            pre_objects[u].append(
-                                Object(
-                                    obj, [0,0], u, None, {'merged': True}
-                                )
-                            )
-                """
+                    for i in inc_pre_objects[st]
+                ])
+
+
         # Making sure all structures in pre_objects are added:
         for structure in pre_objects:
             # Merging structures which overlap (test)
@@ -856,6 +851,8 @@ class AnnotationPatches(Annotation):
             
             # Adding objects finally
             if merged_objects.geom_type=='Polygon':
+                #print(structure)
+                #print(merged_objects.area)
                 self.objects[structure].append(
                     Object(
                         merged_objects.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
@@ -913,25 +910,39 @@ class AnnotationPatches(Annotation):
             ]
             self.n_patch = [1,1]
             self.stride = [width,height]
+            self.n_neighbors = 0
+
         else:
 
             # Defining coordinates for each patch and adding to patch_indices array
-            stride_x = int(patch_width*(1-overlap_pct))
-            stride_y = int(patch_height*(1-overlap_pct))
+            if width >= patch_width:
+                stride_x = int(patch_width*(1-overlap_pct))
+                n_patch_x = 1+floor((width-patch_width)/stride_x)
+
+            else:
+                stride_x = int(patch_width)
+                n_patch_x = 1
+            
+            if height >= patch_height:
+                stride_y = int(patch_height*(1-overlap_pct))
+                n_patch_y = 1+floor((height-patch_height)/stride_y)
+
+            else:
+                stride_y = int(patch_height)
+                n_patch_y = 1
 
             self.stride = [stride_x, stride_y]
-
-            # Number of patches in each direction (+1 for last patch consisting of remainder)
-            n_patch_x = 1+floor((width-patch_width)/stride_x)
-            n_patch_y = 1+floor((height-patch_height)/stride_y)
 
             # Defining start coordinates for each direction. This is for same size patches.
             col_starts = [int(region_crs[0]+(i*stride_x)) for i in range(0,n_patch_x)]
             row_starts = [int(region_crs[1]+(i*stride_y)) for i in range(0,n_patch_y)]
 
             # The last patch for each direction. Again, this is the same size as the other patches so there may be higher overlap in the last patches.
-            col_starts.append(int(width-patch_width))
-            row_starts.append(int(height-patch_height))
+            if width >= patch_width:
+                col_starts.append(int(width-patch_width))
+            
+            if height >= patch_height:
+                row_starts.append(int(height-patch_height))
 
             self.n_patch = [len(row_starts),len(col_starts)]
 
@@ -940,7 +951,11 @@ class AnnotationPatches(Annotation):
                 for c_idx,c in enumerate(col_starts):
                     
                     # This parameter determines distance from an edge, if it is equal to zero, this is an edge patch.
-                    distance_from_edge = np.minimum((len(row_starts)-1-r_idx),(len(col_starts)-1-c_idx))
+                    if r_idx==0 or c_idx==0:
+                        distance_from_edge = 0
+                    else:
+                        distance_from_edge = np.minimum((len(row_starts)-1-r_idx),(len(col_starts)-1-c_idx))
+
                     if not distance_from_edge==0:
                         self.patch_list.append(
                             Patch(
