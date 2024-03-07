@@ -434,9 +434,15 @@ class AnnotationPatches(Annotation):
         super().__init__(mpp, min_size)
 
         self.patch_list = []
-        self.processed_patch_list = []
         self.stride = None
         self.n_patch = None
+
+        # Hierarchy:
+        #   - World
+        #   - Super-Community (Maybe find another name)
+        #   - Community
+        #   - Neighborhood
+        #   - Patch
 
         # Whether or not to exclude annotations that intersect with the edges (useful if only complete annotations within a region are desired)
         self.clear_edges = clear_edges
@@ -701,8 +707,6 @@ class AnnotationPatches(Annotation):
         # Adding number of incomplete objects for each structure to the patch object
         patch_obj.n_incomplete += sum([len(patch_obj.incomplete_objects[i]) for i in patch_obj.incomplete_objects])
 
-        self.processed_patch_list.append(patch_obj)
-
     def find_adjacent(self,patch_index):
         # Patch index, mixed with self.n_neighbors returns all possible intersecting patch indices
         #print(f'base_patch index: {patch_index}')
@@ -726,7 +730,7 @@ class AnnotationPatches(Annotation):
         
         # First adding all the complete objects for each patch
         pre_objects = {}
-        for patch in self.processed_patch_list:
+        for patch in self.patch_list:
             complete_structures = list(patch.complete_objects.keys())
             for s in complete_structures:
                 #print(f'structure: {s} has: {len(patch.complete_objects[s])} complete structures')
@@ -753,16 +757,15 @@ class AnnotationPatches(Annotation):
             # Finding the neighbors for this patch
             possible_neighbors = self.find_adjacent(base_patch.patch_index)
             # This is a group of that incomplete patch and all its possible neighbors with incomplete objects
-            #intersecting_groups.append([base_patch]+[i for i in all_patches_with_incomplete if i.patch_index in possible_neighbors])
-            intersecting_groups.append([base_patch]+[i for i in self.patch_list if i.patch_index in possible_neighbors])
+            intersecting_groups.append([i for i in self.patch_list if i.patch_index in possible_neighbors])
         
         # Possibly not the most efficient method
         inc_pre_objects = {}
-        for g_idx,group in enumerate(intersecting_groups):
+        for g_idx,neighborhood in enumerate(intersecting_groups):
             # Getting the structures which have incomplete objects within each patch in a group
             structures_with_incomplete = []
             all_incomplete_structures = []
-            for p in group:
+            for p in neighborhood:
                 incomplete_structures = [i for i in p.incomplete_objects if len(p.incomplete_objects[i])>0]
                 structures_with_incomplete.append(incomplete_structures)
                 all_incomplete_structures.extend(incomplete_structures)
@@ -773,7 +776,7 @@ class AnnotationPatches(Annotation):
                     inc_pre_objects[u] = []
 
                 # Getting all the patches in the group which also have incomplete objects for that structure
-                p_with_u = [group[i] for i in range(len(group)) if u in structures_with_incomplete[i]]
+                p_with_u = [neighborhood[i] for i in range(len(neighborhood)) if u in structures_with_incomplete[i]]
 
                 # Now getting incomplete objects for that structure in this sub-group and finding the ones that intersect
                 incomplete_objects_in_structure = []
@@ -830,7 +833,6 @@ class AnnotationPatches(Annotation):
                     )
                     for i in inc_pre_objects[st]
                 ])
-
 
         # Making sure all structures in pre_objects are added:
         for structure in pre_objects:
