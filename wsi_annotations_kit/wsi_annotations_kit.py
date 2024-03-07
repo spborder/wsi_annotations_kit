@@ -612,7 +612,7 @@ class AnnotationPatches(Annotation):
 
             elif type(structure)==str:
                 n_struct =  1
-                if s not in self.structure_names:
+                if structure not in self.structure_names:
                     self.objects[structure] = []
                     self.structure_names.append(structure)
             else:
