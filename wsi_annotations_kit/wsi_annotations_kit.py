@@ -24,7 +24,7 @@ from skimage.measure import label, find_contours
 from skimage.segmentation import clear_border
 import uuid
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 class Object:
     def __init__(self,
