@@ -437,6 +437,7 @@ class AnnotationPatches(Annotation):
         super().__init__(mpp, min_size)
 
         self.patch_list = []
+        self.processed_patch_list = []
         self.stride = None
         self.n_patch = None
 
