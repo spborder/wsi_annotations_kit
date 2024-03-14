@@ -409,6 +409,9 @@ class Patch:
         self.patch_index = patch_index
         self.edge_direction = edge_direction
 
+        # Defining the box polygon which defines this patch
+        self.patch_box = box(self.left, self.top, self.right, self.bottom)
+
         # Determining if this patch is on an edge
         if self.patch_index[-1]==0:
             self.edge_patch = True
@@ -476,7 +479,7 @@ class AnnotationPatches(Annotation):
 
         patch_obj.n_incomplete += sum([len(patch_obj.incomplete_objects[i]) for i in list(patch_obj.incomplete_objects.keys())])
 
-        self.patch_list.append(patch_obj)
+        self.processed_patch_list.append(patch_obj)
 
     def add_patch_mask(self, mask, patch_obj, mask_type, structure = None):
 
@@ -612,7 +615,7 @@ class AnnotationPatches(Annotation):
 
             elif type(structure)==str:
                 n_struct =  1
-                if s not in self.structure_names:
+                if structure not in self.structure_names:
                     self.objects[structure] = []
                     self.structure_names.append(structure)
             else:
@@ -730,7 +733,7 @@ class AnnotationPatches(Annotation):
         
         # First adding all the complete objects for each patch
         pre_objects = {}
-        for patch in self.patch_list:
+        for patch in self.processed_patch_list:
             complete_structures = list(patch.complete_objects.keys())
             for s in complete_structures:
                 #print(f'structure: {s} has: {len(patch.complete_objects[s])} complete structures')
@@ -748,7 +751,7 @@ class AnnotationPatches(Annotation):
                 ])
 
         # Post-processing annotations, merging intersecting, incomplete annotations from adjacent patches
-        all_patches_with_incomplete = [i for i in self.patch_list if i.n_incomplete>0]
+        all_patches_with_incomplete = [i for i in self.processed_patch_list if i.n_incomplete>0]
         # It's possible some patches will overlap so that an "incomplete" object will be "complete" in another patch.
         # Therefore it should be okay to leave some trailing "incomplete" patches.
         intersecting_groups = []
@@ -757,7 +760,7 @@ class AnnotationPatches(Annotation):
             # Finding the neighbors for this patch
             possible_neighbors = self.find_adjacent(base_patch.patch_index)
             # This is a group of that incomplete patch and all its possible neighbors with incomplete objects
-            intersecting_groups.append([i for i in self.patch_list if i.patch_index in possible_neighbors])
+            intersecting_groups.append([i for i in self.processed_patch_list if i.patch_index in possible_neighbors])
         
         # Possibly not the most efficient method
         inc_pre_objects = {}
