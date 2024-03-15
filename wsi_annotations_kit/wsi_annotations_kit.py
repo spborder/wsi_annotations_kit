@@ -437,7 +437,6 @@ class AnnotationPatches(Annotation):
         super().__init__(mpp, min_size)
 
         self.patch_list = []
-        self.processed_patch_list = []
         self.stride = None
         self.n_patch = None
 
@@ -479,8 +478,6 @@ class AnnotationPatches(Annotation):
                 )
 
         patch_obj.n_incomplete += sum([len(patch_obj.incomplete_objects[i]) for i in list(patch_obj.incomplete_objects.keys())])
-
-        self.processed_patch_list.append(patch_obj)
 
     def add_patch_mask(self, mask, patch_obj, mask_type, structure = None):
 
@@ -620,6 +617,7 @@ class AnnotationPatches(Annotation):
                     self.objects[structure] = []
                     self.structure_names.append(structure)
             else:
+                print('Invalid structure type')
                 raise ValueError
             
             for cls in range(n_struct):
@@ -689,7 +687,6 @@ class AnnotationPatches(Annotation):
                                             )
                                         )
                     
-
                     if len(np.unique(labeled_complete).tolist())>1:
                         # Repeating for complete structures
                         for i in np.unique(labeled_complete).tolist()[1:]:
@@ -710,6 +707,54 @@ class AnnotationPatches(Annotation):
 
         # Adding number of incomplete objects for each structure to the patch object
         patch_obj.n_incomplete += sum([len(patch_obj.incomplete_objects[i]) for i in patch_obj.incomplete_objects])
+
+        # Adding patch_obj to list of in progress patches if the following conditions are met:
+        # - Contains incomplete objects (that are not on the outer edge of the total region)
+
+        #TODO: Check neighborhood of current patch and clean up incomplete objects from intersecting patches
+        neighbor_patches = self.find_adjacent(patch_obj.patch_index)
+        neighbor_patch_obj = [i for i in self.patch_list if i.patch_index in neighbor_patches and i.n_incomplete>0]
+
+        if len(neighbor_patch_obj)>0:
+            # Merging incompletes
+            if len(neighbor_patch_obj)>1:
+                if self.overlap_pct>0:
+                    # Combined boundary box of neighborhood
+                    merged_box = unary_union([i.patch_box for i in neighbor_patch_obj])
+                    for st in self.structure_names:
+                        incompletes = []
+                        for p in neighbor_patch_obj:
+                            if len(p.incomplete_objects[st])>0:
+                                incompletes.extend([i.poly for i in p.incomplete_objects[st]])
+
+                        merged_incompletes = unary_union(incompletes)
+                        if merged_objects.geom_type=='Polygon':
+                            if not merged_objects.intersects(merged_box)
+                            self.objects[structure].append(
+                                Object(
+                                    merged_objects.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
+                                )
+                            )
+                        elif merged_objects.geom_type=='MultiPolygon':
+                            # Iterating through and adding each polygon
+                            for obj in merged_objects.geoms:
+                                self.objects[structure].append(
+                                    Object(
+                                        obj.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
+                                    )
+                                )
+                        elif merged_objects.geom_type=='GeometryCollection':
+                            # only add the polygons
+                            for obj in merged_objects.geoms:
+                                if obj.geom_type=='Polygon':
+                                    self.objects[structure].append(
+                                        Object(
+                                            obj.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
+                                        )
+                                    )
+
+
+
 
     def find_adjacent(self,patch_index):
         # Patch index, mixed with self.n_neighbors returns all possible intersecting patch indices
@@ -734,7 +779,7 @@ class AnnotationPatches(Annotation):
         
         # First adding all the complete objects for each patch
         pre_objects = {}
-        for patch in self.processed_patch_list:
+        for patch in self.patch_list:
             complete_structures = list(patch.complete_objects.keys())
             for s in complete_structures:
                 #print(f'structure: {s} has: {len(patch.complete_objects[s])} complete structures')
@@ -752,7 +797,7 @@ class AnnotationPatches(Annotation):
                 ])
 
         # Post-processing annotations, merging intersecting, incomplete annotations from adjacent patches
-        all_patches_with_incomplete = [i for i in self.processed_patch_list if i.n_incomplete>0]
+        all_patches_with_incomplete = [i for i in self.patch_list if i.n_incomplete>0]
         # It's possible some patches will overlap so that an "incomplete" object will be "complete" in another patch.
         # Therefore it should be okay to leave some trailing "incomplete" patches.
         intersecting_groups = []
@@ -761,7 +806,7 @@ class AnnotationPatches(Annotation):
             # Finding the neighbors for this patch
             possible_neighbors = self.find_adjacent(base_patch.patch_index)
             # This is a group of that incomplete patch and all its possible neighbors with incomplete objects
-            intersecting_groups.append([i for i in self.processed_patch_list if i.patch_index in possible_neighbors])
+            intersecting_groups.append([i for i in self.patch_list if i.patch_index in possible_neighbors])
         
         # Possibly not the most efficient method
         inc_pre_objects = {}
