@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: wsi-annotations-kit
-Version: 1.4.3
+Version: 1.4.4
 Summary: Utility functions for generating, saving, and converting annotation files
 Home-page: https://github.com/spborder/wsi_annotations_kit
 Author: Sam Border
@@ -18,4 +18,6 @@ Version 1.0.0: Initial release, annotations from shapely Polygons
 
 Version 1.0.1: Annotations generated from masks
 
+Version 1.0.2-->1.3.0: Various bug fixes, fixing conversions to other formats
 
+Version 1.4.0: Added AnnotationPatches object for merging annotations from tiles with varying levels of overlap

@@ -424,6 +424,9 @@ class Patch:
         self.incomplete_objects = {}
 
         self.n_incomplete = 0
+
+        self.processed = False
+
     def __str__(self):
         return f'Patch at: {self.left}, {self.top}, {self.right}, {self.bottom}'
 
@@ -437,7 +440,7 @@ class AnnotationPatches(Annotation):
         super().__init__(mpp, min_size)
 
         self.patch_list = []
-        self.processed_patch_list = []
+        self.incomplete_objects = {}
         self.stride = None
         self.n_patch = None
 
@@ -454,8 +457,10 @@ class AnnotationPatches(Annotation):
     def add_patch_shape(self, poly, patch_obj, structure = None, name = None, properties = None):
         
         # For this, just pass a list of all polys in the patch to make it easier
-        patch_obj.complete_structures[structure] = []
-        patch_obj.incomplete_structures[structure] = []
+        if structure not in self.objects:
+            self.objects[structure] = []
+        if structure not in self.incomplete_objects:
+            self.incomplete_objects[structure] = []
 
         outer_box = box(
             minx = 0,
@@ -466,7 +471,7 @@ class AnnotationPatches(Annotation):
 
         for p in poly:
             if not p.intersects(outer_box):
-                patch_obj.complete_objects[structure].append(
+                self.objects[structure].append(
                     Object(
                         p, [patch_obj.left, patch_obj.top], structure, name, properties
                     )
@@ -479,8 +484,6 @@ class AnnotationPatches(Annotation):
                 )
 
         patch_obj.n_incomplete += sum([len(patch_obj.incomplete_objects[i]) for i in list(patch_obj.incomplete_objects.keys())])
-
-        self.processed_patch_list.append(patch_obj)
 
     def add_patch_mask(self, mask, patch_obj, mask_type, structure = None):
 
@@ -505,6 +508,7 @@ class AnnotationPatches(Annotation):
                 
                 if structure_name not in self.structure_names:
                     self.objects[structure_name] = []
+                    self.incomplete_objects[structure_name] = []
                     self.structure_names.append(structure_name)
                 class_mask = np.uint8(mask[:,:,cls].copy())
 
@@ -618,8 +622,10 @@ class AnnotationPatches(Annotation):
                 n_struct =  1
                 if structure not in self.structure_names:
                     self.objects[structure] = []
+                    self.incomplete_objects[structure] = []
                     self.structure_names.append(structure)
             else:
+                print('Invalid structure type')
                 raise ValueError
             
             for cls in range(n_struct):
@@ -689,7 +695,6 @@ class AnnotationPatches(Annotation):
                                             )
                                         )
                     
-
                     if len(np.unique(labeled_complete).tolist())>1:
                         # Repeating for complete structures
                         for i in np.unique(labeled_complete).tolist()[1:]:
@@ -710,6 +715,136 @@ class AnnotationPatches(Annotation):
 
         # Adding number of incomplete objects for each structure to the patch object
         patch_obj.n_incomplete += sum([len(patch_obj.incomplete_objects[i]) for i in patch_obj.incomplete_objects])
+        patch_obj.processed = True
+
+        # Adding patch_obj to list of in progress patches if the following conditions are met:
+        # - Contains incomplete objects (that are not on the outer edge of the total region)
+
+        neighbor_patches = self.find_adjacent(patch_obj.patch_index)
+        neighbor_patch_obj = [i for i in self.patch_list if i.patch_index in neighbor_patches and i.processed]
+
+        # Neighbors are 8-connected (up, down, left, right, up-left, up-right, down-left, down-right)
+        if len(neighbor_patch_obj) == self.n_neighbors * 8:
+            merged_box = unary_union([i.patch_box for i in neighbor_patch_obj])
+
+            if self.overlap_pct>0:
+                # Combined neighborhood polygon (not a box, shape depends on overlap percentage)
+                # Non-overlapping patches would be a 3x3 patch box surrounding a single patch
+                for st in self.structure_names:
+                    incompletes = []
+                    for p in neighbor_patch_obj:
+                        if len(p.incomplete_objects[st])>0:
+                            incompletes.extend([i.poly for i in p.incomplete_objects[st]])
+                    
+                    merged_incompletes = unary_union(incompletes)
+                    if merged_incompletes.geom_type=='Polygon':
+                        merged_incompletes = merged_incompletes.simplify(0.5,preserve_topology=False)
+                        if not merged_incompletes.intersects(merged_box.boundary):
+                            self.objects[structure].append(
+                                Object(
+                                    merged_incompletes, [0,0], structure, None, {'merged': True}
+                                )
+                            )
+                        else:
+                            self.incomplete_objects[structure].append(
+                                Object(
+                                    merged_incompletes, [0,0], structure, None, None
+                                )
+                            )
+
+                    elif merged_incompletes.geom_type=='MultiPolygon':
+                        # Iterating through and adding each polygon
+                        for obj in merged_incompletes.geoms:
+                            obj = obj.simplify(0.5, preserve_topology = False)
+                            if not obj.intersects(merged_box.boundary):
+                                self.objects[structure].append(
+                                    Object(
+                                        obj, [0,0], structure, None, {'merged': True}
+                                    )
+                                )
+                            else:
+                                self.incomplete_objects[structure].append(
+                                    Object(
+                                        obj, [0,0], structure, None, None
+                                    )
+                                )
+
+                    elif merged_incompletes.geom_type=='GeometryCollection':
+                        # only add the polygons
+                        for obj in merged_incompletes.geoms:
+                            if obj.geom_type=='Polygon':
+                                obj = obj.simplify(0.5,preserve_topology=False)
+                                if not obj.intersects(merged_box.boundary):
+                                    self.objects[structure].append(
+                                        Object(
+                                            obj, [0,0], structure, None, {'merged': True}
+                                        )
+                                    )
+                                else:
+                                    self.incomplete_objects[structure].append(
+                                        Object(
+                                            obj, [0,0], structure, None, None
+                                        )
+                                    )
+
+            else:
+                # For non-overlapping patches, dilate and then erode (morphological closing) to make structures which aren't intersecting count as a single object
+                for st in self.structure_names:
+                    incompletes = []
+                    for p in neighbor_patch_obj:
+                        if len(p.incomplete_objects[st])>0:
+                            incompletes.extend([i.poly.buffer(1) for i in p.incomplete_objects[st]])
+
+                    merged_incompletes = unary_union(incompletes)
+                    if merged_incompletes.geom_type=='Polygon':
+                        merged_incompletes = merged_incompletes.simplify(0.5,preserve_topology=False)
+                        if not merged_incompletes.intersects(merged_box.boundary):
+                            self.objects[structure].append(
+                                Object(
+                                    merged_incompletes.buffer(-1), [0,0], structure, None, {'merged': True}
+                                )
+                            )
+                        else:
+                            self.incomplete_objects[structure].append(
+                                Object(
+                                    merged_incompletes.buffer(-1), [0,0], structure, None, None
+                                )
+                            )
+
+                    elif merged_incompletes.geom_type=='MultiPolygon':
+                        # Iterating through and adding each polygon
+                        for obj in merged_incompletes.geoms:
+                            obj = obj.simplify(0.5, preserve_topology = False)
+                            if not obj.intersects(merged_box.boundary):
+                                self.objects[structure].append(
+                                    Object(
+                                        obj.buffer(-1), [0,0], structure, None, {'merged': True}
+                                    )
+                                )
+                            else:
+                                self.incomplete_objects[structure].append(
+                                    Object(
+                                        obj.buffer(-1), [0,0], structure, None, None
+                                    )
+                                )
+
+                    elif merged_incompletes.geom_type=='GeometryCollection':
+                        # only add the polygons
+                        for obj in merged_incompletes.geoms:
+                            if obj.geom_type=='Polygon':
+                                obj = obj.simplify(0.5,preserve_topology=False)
+                                if not obj.intersects(merged_box.boundary):
+                                    self.objects[structure].append(
+                                        Object(
+                                            obj.buffer(-1), [0,0], structure, None, {'merged': True}
+                                        )
+                                    )
+                                else:
+                                    self.incomplete_objects[structure].append(
+                                        Object(
+                                            obj.buffer(-1), [0,0], structure, None, None
+                                        )
+                                    )
 
     def find_adjacent(self,patch_index):
         # Patch index, mixed with self.n_neighbors returns all possible intersecting patch indices
@@ -732,123 +867,18 @@ class AnnotationPatches(Annotation):
 
     def clean_patches(self, merge_method = 'union'):
         
-        # First adding all the complete objects for each patch
-        pre_objects = {}
-        for patch in self.processed_patch_list:
-            complete_structures = list(patch.complete_objects.keys())
-            for s in complete_structures:
-                #print(f'structure: {s} has: {len(patch.complete_objects[s])} complete structures')
-                if s not in pre_objects:
-                    pre_objects[s] = []
-                    if s not in self.structure_names:
-                        self.objects[s] = []
-                        self.structure_names.append(s)
-                
-                pre_objects[s].extend([
-                    Object(
-                        p.poly.simplify(0.5,preserve_topology=False), [0,0], s, None, None
-                    )
-                    for p in patch.complete_objects[s]
-                ])
+        # Making sure all structures in self.incomplete_objects are added:
+        for structure in self.structure_names:
 
-        # Post-processing annotations, merging intersecting, incomplete annotations from adjacent patches
-        all_patches_with_incomplete = [i for i in self.processed_patch_list if i.n_incomplete>0]
-        # It's possible some patches will overlap so that an "incomplete" object will be "complete" in another patch.
-        # Therefore it should be okay to leave some trailing "incomplete" patches.
-        intersecting_groups = []
-        for base_patch in all_patches_with_incomplete:
-            
-            # Finding the neighbors for this patch
-            possible_neighbors = self.find_adjacent(base_patch.patch_index)
-            # This is a group of that incomplete patch and all its possible neighbors with incomplete objects
-            intersecting_groups.append([i for i in self.processed_patch_list if i.patch_index in possible_neighbors])
-        
-        # Possibly not the most efficient method
-        inc_pre_objects = {}
-        for g_idx,neighborhood in enumerate(intersecting_groups):
-            # Getting the structures which have incomplete objects within each patch in a group
-            structures_with_incomplete = []
-            all_incomplete_structures = []
-            for p in neighborhood:
-                incomplete_structures = [i for i in p.incomplete_objects if len(p.incomplete_objects[i])>0]
-                structures_with_incomplete.append(incomplete_structures)
-                all_incomplete_structures.extend(incomplete_structures)
-            
-            unique_structures = np.unique(all_incomplete_structures)
-            for u_idx,u in enumerate(unique_structures):
-                if u not in inc_pre_objects:
-                    inc_pre_objects[u] = []
-
-                # Getting all the patches in the group which also have incomplete objects for that structure
-                p_with_u = [neighborhood[i] for i in range(len(neighborhood)) if u in structures_with_incomplete[i]]
-
-                # Now getting incomplete objects for that structure in this sub-group and finding the ones that intersect
-                incomplete_objects_in_structure = []
-                for pu_idx,pu in enumerate(p_with_u):
-                    #print(f'group: {g_idx}/{len(intersecting_groups)}, structure: {u_idx}/{len(unique_structures)}, patch: {pu_idx}/{len(p_with_u)}')
-                    for i in pu.incomplete_objects[u]:
-                        if i.poly.buffer(0).is_valid:
-                            # Not adding incomplete objects that intersect with complete objects
-                            if not any([i.poly.buffer(0).intersects(j.poly) for j in pre_objects[u]]):
-                                if any([i.poly.buffer(0).overlaps(j) for j in incomplete_objects_in_structure]):
-                                    combination = unary_union([i.poly.buffer(0)]+incomplete_objects_in_structure)
-                                    if combination.geom_type=='Polygon':
-                                        incomplete_objects_in_structure.append(combination)
-                                    elif combination.geom_type=='MultiPolygon':
-                                        for piece in combination.geoms:
-                                            incomplete_objects_in_structure.append(piece)
-                                    elif combination.geom_type=='GeometryCollection':
-                                        for piece in combination.geoms:
-                                            if piece.geom_type=='Polygon':
-                                                incomplete_objects_in_structure.append(piece)
-                                else:
-                                    incomplete_objects_in_structure.append(i.poly.buffer(0))
-
-                        else:
-                            valid_poly = make_valid(i.poly.buffer(0))
-                            if not any([valid_poly.intersects(j.poly) for j in pre_objects[u]]):
-                                if any([valid_poly.overlaps(j) for j in incomplete_objects_in_structure]):
-                                    combination = unary_union([valid_poly]+incomplete_objects_in_structure)
-                                    if combination.geom_type=='Polygon':
-                                        incomplete_objects_in_structure.append(combination)
-                                    elif combination.geom_type=='MultiPolygon':
-                                        for piece in combination.geoms:
-                                            incomplete_objects_in_structure.append(piece)
-                                    elif combination.geom_type=='GeometryCollection':
-                                        for piece in combination.geoms:
-                                            if piece.geom_type=='Polygon':
-                                                incomplete_objects_in_structure.append(piece)
-                                else:
-                                    incomplete_objects_in_structure.append(i.poly.buffer(0))
-
-                inc_pre_objects[u].extend([
-                    Object(
-                        inc, [0,0], u, None, None
-                    )
-                    for inc in incomplete_objects_in_structure
-                ])
-
-        # Adding merged, non-overlapping incomplete structures
-        for st in self.structure_names:
-            if st in inc_pre_objects:
-                pre_objects[st].extend([
-                    Object(
-                        i.poly,[0,0],st,None,None
-                    )
-                    for i in inc_pre_objects[st]
-                ])
-
-        # Making sure all structures in pre_objects are added:
-        for structure in pre_objects:
             # Merging structures which overlap (test)
             if merge_method=='union':
-                merged_objects = unary_union([i.poly.buffer(0) for i in pre_objects[structure] if i.poly.buffer(0).is_valid])
+                merged_objects = unary_union([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid])
             elif merge_method=='envelope':
-                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in pre_objects[structure] if i.poly.buffer(0).is_valid]).envelope
+                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).envelope
             elif merge_method=='minimum_rotated_rectangle':
-                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in pre_objects[structure] if i.poly.buffer(0).is_valid]).minimum_rotated_rectangle
+                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).minimum_rotated_rectangle
             elif merge_method=='convex_hull':
-                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in pre_objects[structure] if i.poly.buffer(0).is_valid]).convex_hull
+                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).convex_hull
 
             else:
                 print('Invalid merge_method')
@@ -857,8 +887,6 @@ class AnnotationPatches(Annotation):
             
             # Adding objects finally
             if merged_objects.geom_type=='Polygon':
-                #print(structure)
-                #print(merged_objects.area)
                 self.objects[structure].append(
                     Object(
                         merged_objects.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
