@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.append('..')
-import wsi_annotations_kit.wsi_annotations_kit as wak
+import wsi_annotations_kit.wsi_annotations_kit.wsi_annotations_kit as wak
 print(dir(wak))
 
 def preprocess_mask(mask_image,mask_type):
@@ -76,7 +76,7 @@ def main():
         width = np.shape(processed_mask)[1],
         patch_height = 256,
         patch_width = 256,
-        overlap_pct = 0.5
+        overlap_pct = 0.1
     )
 
     print(len(patch_annotation.patch_list))
