@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="wsi-annotations-kit",
-    version="1.4.4",
+    version="1.4.7",
     author="Sam Border",
     author_email="sam.border2256@gmail.com",
     description="Utility functions for generating, saving, and converting annotation files",
@@ -17,7 +17,7 @@ setuptools.setup(
         "geojson==3.0.1",
         "shapely==2.0.1",
         "tqdm==4.65.0",
-        "numpy==1.24.3",
+        "numpy>=1.20.0",
         "uuid",
         "scikit-image==0.20.0"
     ],

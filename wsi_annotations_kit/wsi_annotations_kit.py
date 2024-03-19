@@ -322,16 +322,15 @@ class Annotation:
             # Expecting mask format [height, width, classes]
             for cls in range(np.shape(mask)[-1]):
                 
-                if not structure is None:
-                    if type(structure) == list:
-                        structure_name = structure[cls]
-                    elif type(structure) == dict:
-                        structure_name = structure[str(cls)]
-                    elif type(structure) == str:
-                        structure_name = structure
-                    else:
-                        # Add some raise statement here
-                        raise ValueError
+                if type(structure) == list:
+                    structure_name = structure[cls]
+                elif type(structure) == dict:
+                    structure_name = structure[str(cls)]
+                elif type(structure) == str:
+                    structure_name = structure
+                else:
+                    # Add some raise statement here
+                    raise ValueError
                     
                 class_mask = mask[:,:,cls].copy()
 
@@ -577,7 +576,7 @@ class AnnotationPatches(Annotation):
 
                         patch_obj.incomplete_objects[structure_name].append(
                             Object(
-                                obj_poly, [0,0], structure_name
+                                obj_poly, [0,0], structure_name,None,None
                             )
                         )
                 
@@ -598,7 +597,7 @@ class AnnotationPatches(Annotation):
                         obj_poly = Polygon(poly_list)
                         patch_obj.complete_objects[structure_name].append(
                             Object(
-                                obj_poly, [0,0], structure_name
+                                obj_poly, [0,0], structure_name,None,None
                             )
                         )
 
@@ -732,11 +731,15 @@ class AnnotationPatches(Annotation):
                 # Non-overlapping patches would be a 3x3 patch box surrounding a single patch
                 for st in self.structure_names:
                     incompletes = []
+                    completes = []
                     for p in neighbor_patch_obj:
                         if len(p.incomplete_objects[st])>0:
                             incompletes.extend([i.poly for i in p.incomplete_objects[st]])
+                        
+                        if len(p.complete_objects[st])>0:
+                            completes.extend([i.poly for i in p.complete_objects[st]])
                     
-                    merged_incompletes = unary_union(incompletes)
+                    merged_incompletes = unary_union(incompletes+completes)
                     if merged_incompletes.geom_type=='Polygon':
                         merged_incompletes = merged_incompletes.simplify(0.5,preserve_topology=False)
                         if not merged_incompletes.intersects(merged_box.boundary):
@@ -791,11 +794,16 @@ class AnnotationPatches(Annotation):
                 # For non-overlapping patches, dilate and then erode (morphological closing) to make structures which aren't intersecting count as a single object
                 for st in self.structure_names:
                     incompletes = []
+                    completes = []
                     for p in neighbor_patch_obj:
                         if len(p.incomplete_objects[st])>0:
                             incompletes.extend([i.poly.buffer(1) for i in p.incomplete_objects[st]])
+                        
+                        if len(p.complete_objects[st])>0:
+                            completes.extend([i.poly.buffer(1) for i in p.complete_objects[st]])
 
-                    merged_incompletes = unary_union(incompletes)
+
+                    merged_incompletes = unary_union(incompletes+completes)
                     if merged_incompletes.geom_type=='Polygon':
                         merged_incompletes = merged_incompletes.simplify(0.5,preserve_topology=False)
                         if not merged_incompletes.intersects(merged_box.boundary):
@@ -869,46 +877,46 @@ class AnnotationPatches(Annotation):
         
         # Making sure all structures in self.incomplete_objects are added:
         for structure in self.structure_names:
+            if structure in self.incomplete_objects:
+                # Merging structures which overlap (test)
+                if merge_method=='union':
+                    merged_objects = unary_union([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid])
+                elif merge_method=='envelope':
+                    merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).envelope
+                elif merge_method=='minimum_rotated_rectangle':
+                    merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).minimum_rotated_rectangle
+                elif merge_method=='convex_hull':
+                    merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).convex_hull
 
-            # Merging structures which overlap (test)
-            if merge_method=='union':
-                merged_objects = unary_union([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid])
-            elif merge_method=='envelope':
-                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).envelope
-            elif merge_method=='minimum_rotated_rectangle':
-                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).minimum_rotated_rectangle
-            elif merge_method=='convex_hull':
-                merged_objects = shapely.MultiPolygon([i.poly.buffer(0) for i in self.incomplete_objects[structure] if i.poly.buffer(0).is_valid]).convex_hull
-
-            else:
-                print('Invalid merge_method')
-                print('Choose from: union, envelope, minimum_rotated_rectangle, or convex_hull')
-                raise ValueError
-            
-            # Adding objects finally
-            if merged_objects.geom_type=='Polygon':
-                self.objects[structure].append(
-                    Object(
-                        merged_objects.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
-                    )
-                )
-            elif merged_objects.geom_type=='MultiPolygon':
-                # Iterating through and adding each polygon
-                for obj in merged_objects.geoms:
+                else:
+                    print('Invalid merge_method')
+                    print('Choose from: union, envelope, minimum_rotated_rectangle, or convex_hull')
+                    raise ValueError
+                
+                # Adding objects finally
+                if merged_objects.geom_type=='Polygon':
                     self.objects[structure].append(
                         Object(
-                            obj.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
+                            merged_objects.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
                         )
                     )
-            elif merged_objects.geom_type=='GeometryCollection':
-                # only add the polygons
-                for obj in merged_objects.geoms:
-                    if obj.geom_type=='Polygon':
+                elif merged_objects.geom_type=='MultiPolygon':
+                    # Iterating through and adding each polygon
+                    for obj in merged_objects.geoms:
                         self.objects[structure].append(
                             Object(
                                 obj.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
                             )
                         )
+                elif merged_objects.geom_type=='GeometryCollection':
+                    # only add the polygons
+                    for obj in merged_objects.geoms:
+                        if obj.geom_type=='Polygon':
+                            self.objects[structure].append(
+                                Object(
+                                    obj.simplify(0.5,preserve_topology=False), [0,0], structure, None, {'merged': True}
+                                )
+                            )
 
     def define_patches(self, region_crs, height, width, patch_height, patch_width, overlap_pct):
         # Used to increase efficiency, pre-allocating patch coordinates and adjacency

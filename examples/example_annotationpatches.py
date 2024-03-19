@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.append('..')
-import wsi_annotations_kit.wsi_annotations_kit.wsi_annotations_kit as wak
+import wsi_annotations_kit.wsi_annotations_kit as wak
 print(dir(wak))
 
 def preprocess_mask(mask_image,mask_type):
