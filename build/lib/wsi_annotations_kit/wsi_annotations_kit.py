@@ -318,10 +318,9 @@ class Annotation:
         # Adding a mask object to your set of annotations
         # type = either 'one-hot' or nothing
         # structure here should be a list or dictionary for aligning index/label with structure
-        if mask_type == 'one-hot':
+        if 'one-hot' in mask_type:
             # Expecting mask format [height, width, classes]
             for cls in range(np.shape(mask)[-1]):
-                
                 if type(structure) == list:
                     structure_name = structure[cls]
                 elif type(structure) == dict:
@@ -341,11 +340,24 @@ class Annotation:
                     # Find contours where labeled mask is equal to i
                     obj_contours = find_contours(labeled_mask,i)
 
-                    # This is in (rows,columns) format
-                    poly_list = [(i[0],i[1]) for i in obj_contours]
-                    # Making polygon from contours
-                    obj_poly = Polygon(poly_list)
-                    self.add_shape(obj_poly,box_crs,structure_name)
+                    for obj_contour in obj_contours:
+                        # This is in (rows,columns) format
+                        poly_list = [((int(i[1])),int(i[0])) for i in obj_contour]
+                        # Making polygon from contours
+                        obj_poly = Polygon(poly_list)
+                        if not obj_poly.is_valid:
+                            made_valid = make_valid(obj_poly)
+                            if made_valid.geom_type in ['MultiPolygon','GeometryCollection']:
+                                for obj in made_valid.geoms:
+                                    self.add_shape(
+                                        obj,box_crs, structure_name
+                                    )
+                            elif made_valid.geom_type == 'Polygon':
+                                self.add_shape(
+                                    made_valid, box_crs, structure_name
+                                )
+                        else:
+                            self.add_shape(obj_poly,box_crs,structure_name)
         else:
             # Expecting mask format [height, width]
             if type(structure)==list:
@@ -377,19 +389,27 @@ class Annotation:
 
                     # Find contours where labeled mask is equal to i
                     obj_contours = find_contours(labeled_mask==i+1)
-                    if len(obj_contours)==1:
-                        poly_list = obj_contours[0].tolist()
-                        poly_list = [(int(i[1]),int(i[0])) for i in poly_list]
-                    else:
-                        # Find the largest one
-                        contours_size = [np.shape(i)[0] for i in obj_contours]
-                        poly_list = obj_contours[np.argmax(contours_size)].tolist()
+
+                    for obj_contour in obj_contours:
+
                         poly_list = [(int(i[1]),int(i[0])) for i in poly_list]
 
-                    if len(poly_list)>2:
-                        # Making polygon from contours 
-                        obj_poly = Polygon(poly_list)
-                        self.add_shape(obj_poly,box_crs,structure_name)
+                        if len(poly_list)>2:
+                            # Making polygon from contours 
+                            obj_poly = Polygon(poly_list)
+                            if not obj_poly.is_valid:
+                                made_valid = make_valid(obj_poly)
+                                if made_valid.geom_type in ['MultiPolygon','GeometryCollection']:
+                                    for obj in made_valid.geoms:
+                                        self.add_shape(
+                                            obj, box_crs, structure_name
+                                        )
+                                elif made_valid.geom_type=='Polygon':
+                                    self.add_shape(
+                                        obj, box_crs, structure_name
+                                    )
+                            else:
+                                self.add_shape(obj_poly,box_crs,structure_name)
 
 
 class Patch:
@@ -563,35 +583,37 @@ class AnnotationPatches(Annotation):
                     # Finding object contours:
                     obj_contours = find_contours(labeled_incomplete==i)
 
-                    if len(obj_contours)==1:
-                        obj_contours = obj_contours[0].tolist()
-                    else:
-                        # Finding the largest one
-                        contours_size = [np.shape(i)[0] for i in obj_contours]
-                        obj_contours = obj_contours[np.argmax(contours_size)].tolist()
+                    for obj_contour in obj_contours:
 
-                    poly_list = [(int(i[0]+patch_obj.left),int(i[1]+patch_obj.top)) for i in obj_contours]
+                        poly_list = [(int(i[1]+patch_obj.left),int(i[0]+patch_obj.top)) for i in obj_contour]
 
-                    if len(poly_list)>2:
-                        obj_poly = Polygon(poly_list)
+                        if len(poly_list)>2:
+                            obj_poly = Polygon(poly_list)
 
-                        if not obj_poly.is_valid:
-                            made_valid = make_valid(obj_poly)
+                            if not obj_poly.is_valid:
+                                made_valid = make_valid(obj_poly)
 
-                            if made_valid.geom_type in ['MultiPolygon','GeometryCollection']:
-                                for obj in made_valid.geoms:
-                                    if obj.geom_type=='Polygon':
+                                if made_valid.geom_type in ['MultiPolygon','GeometryCollection']:
+                                    for obj in made_valid.geoms:
+                                        if obj.geom_type=='Polygon':
+                                            patch_obj.incomplete_objects[structure_name].append(
+                                                Object(
+                                                    obj, [0,0], structure_name,None,None
+                                                )
+                                            )
+                                else:
+                                    if made_valid.geom_type=='Polygon':
                                         patch_obj.incomplete_objects[structure_name].append(
                                             Object(
-                                                obj, [0,0], structure_name,None,None
+                                                made_valid, [0,0], structure_name, None, None
                                             )
                                         )
-                        else:
-                            patch_obj.incomplete_objects[structure_name].append(
-                                Object(
-                                    obj_poly, [0,0], structure_name,None,None
+                            else:
+                                patch_obj.incomplete_objects[structure_name].append(
+                                    Object(
+                                        obj_poly, [0,0], structure_name,None,None
+                                    )
                                 )
-                            )
                 
                 # Repeating for complete structures
                 for i in np.unique(labeled_complete).tolist()[1:]:
@@ -599,7 +621,7 @@ class AnnotationPatches(Annotation):
 
                     for obj_contour in obj_contours:
 
-                        poly_list = [(int(i[0]+patch_obj.left),int(i[1]+patch_obj.top)) for i in obj_contour]
+                        poly_list = [(int(i[1]+patch_obj.left),int(i[0]+patch_obj.top)) for i in obj_contour]
 
                         if len(poly_list)>2:
                             obj_poly = Polygon(poly_list)
@@ -613,6 +635,12 @@ class AnnotationPatches(Annotation):
                                                 obj, [0,0], structure_name,None,None
                                             )
                                         )     
+                                elif made_valid.geom_type == 'Polygon':
+                                    patch_obj.complete_objects[structure_name].append(
+                                        Object(
+                                            made_valid, [0,0], structure_name, None,None
+                                        )
+                                    )
                             else:
                                 patch_obj.complete_objects[structure_name].append(
                                     Object(
@@ -776,11 +804,11 @@ class AnnotationPatches(Annotation):
                     completes = []
                     for p in neighbor_patch_obj:
                         if len(p.complete_objects[st])>0:
-                            completes.extend([i.poly.buffer(0.5) for i in p.complete_objects[st]])
+                            completes.extend([i.poly for i in p.complete_objects[st]])
                             p.complete_objects[st] = []
                     for p in neighbor_patch_obj:
                         if len(p.incomplete_objects[st])>0:
-                            incompletes.extend([i.poly.buffer(0.5) for i in p.incomplete_objects[st] if not any([i.poly.buffer(0.5).intersects(j) for j in completes])])
+                            incompletes.extend([i.poly for i in p.incomplete_objects[st] if not any([i.poly.intersects(j) for j in completes])])
 
                     merged_incompletes = unary_union(incompletes+completes)
                     if not merged_incompletes.is_empty:
@@ -938,11 +966,11 @@ class AnnotationPatches(Annotation):
                     completes = []
                     for p in neighbor_patch_obj:
                         if len(p.complete_objects[st])>0:
-                            completes.extend([i.poly.buffer(0.5) for i in p.complete_objects[st]])
+                            completes.extend([i.poly.buffer(0.01) for i in p.complete_objects[st]])
                             p.complete_objects[st] = []
                     for p in neighbor_patch_obj:
                         if len(p.incomplete_objects[st])>0:
-                            incompletes.extend([i.poly.buffer(0.5) for i in p.incomplete_objects[st] if not any([i.poly.buffer(0.5).intersects(j) for j in completes])])
+                            incompletes.extend([i.poly.buffer(0.01) for i in p.incomplete_objects[st] if not any([i.poly.buffer(0.01).intersects(j) for j in completes])])
 
                     merged_incompletes = unary_union(incompletes+completes)
                     if not merged_incompletes.is_empty:
