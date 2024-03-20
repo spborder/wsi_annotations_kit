@@ -10,6 +10,7 @@ import sys
 import numpy as np
 
 from PIL import Image
+from skimage.measure import label
 
 sys.path.append('..')
 import wsi_annotations_kit.wsi_annotations_kit.wsi_annotations_kit as wak
@@ -29,6 +30,12 @@ def preprocess_mask(mask_image,mask_type):
         for class_idx,cls in enumerate(classes):
             processed_mask[:,:,class_idx] = (gray_image==cls)
 
+    elif mask_type=='one-hot-labeled':
+        # Processing for one-hot (classes) labeled (instances)
+        processed_mask = np.zeros((np.shape(gray_image)[0],np.shape(gray_image)[1],n_class))
+        for class_idx,cls in enumerate(classes):
+            processed_mask[:,:,class_idx] = label((gray_image==cls))
+
     else:
         # Processing for non-one-hot, categorical labels
         processed_mask = np.zeros_like(gray_image)
@@ -44,21 +51,24 @@ def main():
     # Loading example object mask
     test_image_path = './examples/test_image.png'
     test_image_mask = np.array(Image.open(test_image_path))
-    test_mask_type = 'binary'
+    test_mask_type = 'one-hot-labeled'
 
     # Preprocessing mask to be in either one-hot or class label format
     processed_mask = preprocess_mask(test_image_mask,test_mask_type)
-    print(f'Number of objects: {len(np.unique(processed_mask))-1}')
-    n_struct = len(np.unique(processed_mask).tolist())
-
+    if not 'one-hot' in test_mask_type:
+        print(f'Number of objects: {len(np.unique(processed_mask))-1}')
+        n_struct = len(np.unique(processed_mask).tolist())-1
+    else:
+        n_struct = np.shape(processed_mask)[-1]
+    
     # Initializing annotation object (single "patch")
     annotation = wak.Annotation()
-    annotation.add_names([f'Structure{i}' for i in range(n_struct-1)])
+    annotation.add_names([f'Structure{i}' for i in range(n_struct)])
     annotation.add_mask(
         mask = processed_mask,
         box_crs = [0,0],
         mask_type=test_mask_type,
-        structure = [f'Structure{i}' for i in range(n_struct-1)]
+        structure = [f'Structure{i}' for i in range(n_struct)]
     )
 
     # Testing saving annotations
@@ -66,7 +76,6 @@ def main():
     annotation.geojson_save('./examples/test_geojson.geojson')
     annotation.json_save('./examples/test_json.json')
 
-    print(np.shape(processed_mask))
     # Now doing the same thing but using the AnnotationPatches method
     patch_annotation = wak.AnnotationPatches(clear_edges = False)
     # Pre-define patches according to desired criteria
@@ -96,7 +105,7 @@ def main():
                 mask = mask_region,
                 patch_obj = new_patch,
                 mask_type = test_mask_type,
-                structure = [f'Structure{i}' for i in range(n_struct-1)]
+                structure = [f'Structure{i}' for i in range(n_struct)]
             )
 
         except StopIteration:
