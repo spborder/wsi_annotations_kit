@@ -338,7 +338,7 @@ class Annotation:
                 for i in range(n_objects):
                     
                     # Find contours where labeled mask is equal to i
-                    obj_contours = find_contours(labeled_mask,i)
+                    obj_contours = find_contours(labeled_mask==i+1)
 
                     for obj_contour in obj_contours:
                         # This is in (rows,columns) format
@@ -392,7 +392,7 @@ class Annotation:
 
                     for obj_contour in obj_contours:
 
-                        poly_list = [(int(i[1]),int(i[0])) for i in poly_list]
+                        poly_list = [(int(i[1]),int(i[0])) for i in obj_contour]
 
                         if len(poly_list)>2:
                             # Making polygon from contours 
@@ -985,7 +985,7 @@ class AnnotationPatches(Annotation):
                             else:
                                 self.incomplete_objects[st].append(
                                     Object(
-                                        merged_incompletes, [0,0], structure, None, None
+                                        merged_incompletes, [0,0], st, None, None
                                     )
                                 )
 
