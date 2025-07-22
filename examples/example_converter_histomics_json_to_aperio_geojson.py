@@ -31,7 +31,7 @@ def convert_to_qupath_geojson(input_filename, output_filename):
             print(f"Skipping item due to missing keys: {annotation_item}")
             continue
 
-       # Iterate through each geometric element in the annotatio
+       # Iterate through each geometric element in the annotation
         for element in annotation_item['annotation']['elements']:
             geometry_type = element.get('type', '')
             coordinates = []
