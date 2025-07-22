@@ -1,107 +1,101 @@
 import json
-import argparse
+import math
 
-def convert_to_aperio_geojson(input_filename, output_filename):
+def convert_to_qupath_geojson(input_filename, output_filename):
     """
-    Converts a specific JSON annotation format to a GeoJSON format
-    compatible with Aperio.
-
+    Converts a JSON annotation format to QuPath-compatible GeoJSON format.
     Args:
-        input_filename (str): The path to the input JSON annotation file.
-        output_filename (str): The path where the output GeoJSON file will be saved.
+        input_filename (str): Path to the input JSON annotation file.
+        output_filename (str): Path to save the output GeoJSON file.
     """
     try:
         with open(input_filename, 'r') as f:
             data = json.load(f)
     except FileNotFoundError:
-        print(f"Error: The file '{input_filename}' was not found.")
+        print(f"Error: File '{input_filename}' not found.")
         return
     except json.JSONDecodeError:
-        print(f"Error: Could not decode JSON from the file '{input_filename}'.")
+        print(f"Error: Could not decode JSON from file '{input_filename}'.")
         return
-
+      
     # Initialize the structure for a GeoJSON FeatureCollection
     geojson_output = {
         "type": "FeatureCollection",
         "features": []
     }
-
+    
     # The input data is a list of annotations
     for annotation_item in data:
         # Check if the required keys exist
         if "annotation" not in annotation_item or "elements" not in annotation_item["annotation"]:
-            print(f"Skipping an item due to missing 'annotation' or 'elements' key: {annotation_item.get('_id')}")
+            print(f"Skipping item due to missing keys: {annotation_item}")
             continue
 
-        # Iterate through each geometric element in the annotation
+       # Iterate through each geometric element in the annotatio
         for element in annotation_item['annotation']['elements']:
-            if element.get('type') == 'polyline' and 'points' in element:
-                # Extract coordinates, removing the Z-value (the 3rd element)
-                # GeoJSON uses (x, y) coordinates.
+            geometry_type = element.get('type', '')
+            coordinates = []
+            if geometry_type == 'polyline' and 'points' in element:
+                # Extract coordinates for the polyline
                 coordinates = [point[:2] for point in element['points']]
-
                 # Ensure the polygon is closed by making sure the first and last points are the same
                 if element.get('closed') and coordinates and coordinates[0] != coordinates[-1]:
-                    coordinates.append(coordinates[0])
+                    coordinates.append(coordinates[0])  # Close the polygon
 
-                # Create the geometry for the GeoJSON feature.
-                # For a closed polyline, this is a Polygon.
-                geometry = {
-                    "type": "Polygon",
-                    "coordinates": [coordinates] # Polygons require a list of linear rings.
-                }
+            elif geometry_type == 'ellipse' and 'center' in element and 'radiusX' in element and 'radiusY' in element:
+                
+                # Convert ellipse to polygon with vertices
+                center = element['center']
+                radiusX = element['radiusX']
+                radiusY = element['radiusY']
+                num_points = 50  # Number of vertices to approximate the ellipse
+                # Generate points to outline shape of an ellipse using trigonometric functions(parametric equation of an ellipse)
+                coordinates = [
+                    [
+                        center[0] + radiusX * math.cos(2 * math.pi * i / num_points),
+                        center[1] + radiusY * math.sin(2 * math.pi * i / num_points)
+                    ]
+                    for i in range(num_points)
+                ]
+                coordinates.append(coordinates[0])  # Close the polygon
+            else:
+                print(f"Unsupported geometry type: {geometry_type}")
+                continue
 
-                # Set up the properties for the feature, including styling
-                # and any other metadata from the source.
-                properties = {
-                    "id": element.get('id'),
-                    "lineColor": element.get('lineColor'),
-                    "fillColor": element.get('fillColor'),
-                    "lineWidth": element.get('lineWidth')
-                }
+            # Validate the number of points in the polygon
+            if len(coordinates) < 4:
+                print(f"Skipping feature with insufficient points: {coordinates}")
+            continue
+               geometry = {
+                "type": "Polygon",
+                "coordinates": [coordinates]  # Linear ring for a polygon
+            }
 
-                # Create the final GeoJSON Feature object
-                feature = {
-                    "type": "Feature",
-                    "geometry": geometry,
-                    "properties": properties
-                }
+            properties = {
+                "classification": annotation_item['annotation'].get('name', 'DefaultClassification'),
+                "name": annotation_item['annotation'].get('name', 'Unnamed'),
+                "id": element.get('id', ''),
+                "fillColor": element.get('fillColor', '#FFFFFF'),
+                "lineColor": element.get('lineColor', '#000000'),
+                "lineWidth": element.get('lineWidth', 1)
+            }
 
-                # Add the feature to our collection
-                geojson_output['features'].append(feature)
+            feature = {
+                "type": "Feature",
+                "geometry": geometry,
+                "properties": properties
+            }
 
-    # Write the complete GeoJSON object to the output file
+            geojson_output["features"].append(feature)
+
     try:
         with open(output_filename, 'w') as f:
             json.dump(geojson_output, f, indent=2)
-        print(f"Successfully converted '{input_filename}' to '{output_filename}'")
+        print(f"Successfully converted '{input_filename}' to '{output_filename}'.")
     except IOError:
-        print(f"Error: Could not write to the file '{output_filename}'.")
+        print(f"Error: Could not write to file '{output_filename}'.")
 
 
-if __name__ == '__main__':
-    # --- Instructions for use ---
-    # This script is designed to be run from the command line.
-    #
-    # Usage:
-    # python your_script_name.py <input_json_file> <output_geojson_file>
-    #
-    # Example:
-    # python converter.py N20_annotations.json N20_output.geojson
-    
-    parser = argparse.ArgumentParser(
-        description="Converts a specific JSON annotation format to Aperio-compatible GeoJSON."
-    )
-    parser.add_argument(
-        "input_file", 
-        help="The path to the input JSON annotation file."
-    )
-    parser.add_argument(
-        "output_file", 
-        help="The path for the output GeoJSON file."
-    )
-    
-    args = parser.parse_args()
-    
-    convert_to_aperio_geojson(args.input_file, args.output_file)
-
+# Example Usage
+convert_to_qupath_geojson(r"file_path.json",
+                          r"your_result.geojson")
